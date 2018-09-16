@@ -1,20 +1,17 @@
 use std::cmp;
-use std::io::{
-    self,
-    prelude::*
-};
+use std::io::{self, prelude::*};
 
 struct Block([u8]);
 
-
 trait Disk {
-    fn read_block(&mut self, blocknum: u64, buf: &mut [u8])-> io::Result<()>;
+    fn read_block(&mut self, blocknum: u64, buf: &mut [u8]) -> io::Result<()>;
     fn write_block(&mut self, blocknum: u64, buf: &[u8]) -> io::Result<()>;
     fn sync_disk(&mut self) -> io::Result<()>;
 }
 
-impl <T> Disk for T
-where T: Read + Write + Seek
+impl<T> Disk for T
+where
+    T: Read + Write + Seek,
 {
     fn read_block(&mut self, blocknum: u64, buf: &mut [u8]) -> io::Result<()> {
         let len = cmp::min(buf.len(), 4096);
@@ -36,9 +33,7 @@ where T: Read + Write + Seek
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io::{
-        Cursor,
-    };
+    use std::io::Cursor;
 
     fn make_vec(len: usize) -> Vec<u8> {
         (0..len).enumerate().map(|(i, _)| (i / 128) as u8).collect()
@@ -60,7 +55,7 @@ mod test {
         match c.read_block(0, &mut buf) {
             Ok(()) => panic!("Unexpected success"),
             Err(err) => match err.kind() {
-                io::ErrorKind::UnexpectedEof => {},
+                io::ErrorKind::UnexpectedEof => {}
                 kind => panic!("Got unexpected error: {:?}", kind),
             },
         };
@@ -81,7 +76,7 @@ mod test {
         match c.read_block(5, &mut buf) {
             Ok(()) => panic!("Unexpected success"),
             Err(err) => match err.kind() {
-                io::ErrorKind::UnexpectedEof => {},
+                io::ErrorKind::UnexpectedEof => {}
                 kind => panic!("Got unexpected error: {:?}", kind),
             },
         };

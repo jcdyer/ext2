@@ -1,6 +1,8 @@
 [package]
-name = "sfs"
+name = "ext2"
 version = "0.1.0"
 authors = ["J. Cliff Dyer <jcd@sdf.org>"]
 
 [dependencies]
+byteorder = "1.2.6"
+uuid = "0.7.1"

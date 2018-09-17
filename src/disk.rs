@@ -1,9 +1,7 @@
 use std::cmp;
 use std::io::{self, prelude::*};
 
-struct Block([u8]);
-
-trait Disk {
+pub trait Disk {
     fn read_block(&mut self, blocknum: u64, buf: &mut [u8]) -> io::Result<()>;
     fn write_block(&mut self, blocknum: u64, buf: &[u8]) -> io::Result<()>;
     fn sync_disk(&mut self) -> io::Result<()>;

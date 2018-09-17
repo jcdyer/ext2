@@ -12,18 +12,14 @@ mod disk;
 pub struct FsPath([u8; 64]);
 
 impl FsPath {
-    fn new(val: [u8; 64]) -> FsPath {
+    pub fn new(val: [u8; 64]) -> FsPath {
         FsPath(val)
     }
 }
 
 impl fmt::Debug for FsPath {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "[{}, {}, {}, {}, ...]",
-            self.0[0], self.0[1], self.0[2], self.0[3]
-        )
+        write!(f, r#"FsPath::new({:?})"#, &self.0[..])
     }
 }
 
@@ -63,7 +59,10 @@ impl<T: disk::Disk> Ext2<T> {
         Superblock::new(&block[1024..2048])
     }
 
-    pub fn block_group_descriptor_table(&mut self, sb: &Superblock) -> io::Result<Vec<BlockGroupDescriptor>> {
+    pub fn block_group_descriptor_table(
+        &mut self,
+        sb: &Superblock,
+    ) -> io::Result<Vec<BlockGroupDescriptor>> {
         let ct = sb.block_group_count();
         let bs = sb.block_size();
         let mut block = vec![0; bs as usize];

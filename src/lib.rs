@@ -183,7 +183,7 @@ fn array12(input: &[u8]) -> [u8; 12] {
 
 fn copy_array(input: &[u8], output: &mut [u8]) {
     if input.len() != output.len() {
-        panic!("Requires an input length of {}", input.len());
+        panic!("Requires an input length of {}", output.len());
     }
     for i in 0..input.len() {
         output[i] = input[i];
@@ -191,64 +191,64 @@ fn copy_array(input: &[u8], output: &mut [u8]) {
 }
 
 impl Superblock {
-    pub fn new(d: &[u8]) -> io::Result<Superblock> {
+    pub fn new(data: &[u8]) -> io::Result<Superblock> {
         Ok(Superblock {
-            s_inodes_count: LE::read_u32(&d[0..4]),
-            s_blocks_count: LE::read_u32(&d[4..8]), //LE::read_u32(&d[])?,
-            s_r_blocks_count: LE::read_u32(&d[8..12]), // LE::read_u32(&d[])?,
-            s_free_blocks_count: LE::read_u32(&d[12..16]),
-            s_free_inodes_count: LE::read_u32(&d[16..20]),
-            s_first_data_block: LE::read_u32(&d[20..24]),
-            s_log_block_size: LE::read_u32(&d[24..28]),
-            s_log_frag_size: LE::read_u32(&d[28..32]),
-            s_blocks_per_group: LE::read_u32(&d[32..36]),
-            s_frags_per_group: LE::read_u32(&d[36..40]),
-            s_inodes_per_group: LE::read_u32(&d[40..44]),
-            s_mtime: LE::read_u32(&d[44..48]),
-            s_wtime: LE::read_u32(&d[48..52]),
-            s_mnt_count: LE::read_u16(&d[52..54]),
-            s_max_mnt_count: LE::read_u16(&d[54..56]),
-            s_magic: LE::read_u16(&d[56..58]),
-            s_state: LE::read_u16(&d[58..60]),
-            s_errors: LE::read_u16(&d[60..62]),
-            s_minor_rev_level: LE::read_u16(&d[62..64]),
-            s_lastcheck: LE::read_u32(&d[64..68]),
-            s_checkinterval: LE::read_u32(&d[68..72]),
-            s_creator_os: LE::read_u32(&d[72..76]),
-            s_rev_level: LE::read_u32(&d[76..80]),
-            s_def_resuid: LE::read_u16(&d[80..82]),
-            s_def_resgid: LE::read_u16(&d[82..84]),
-            s_first_ino: LE::read_u32(&d[84..88]),
-            s_inode_size: LE::read_u16(&d[88..90]),
-            s_block_group_nr: LE::read_u16(&d[90..92]),
-            s_feature_compat: LE::read_u32(&d[92..96]),
-            s_feature_incompat: LE::read_u32(&d[96..100]),
-            s_feature_ro_compat: LE::read_u32(&d[100..104]),
-            s_uuid: uuid::Uuid::from_slice(&d[104..120]).unwrap(),
-            s_volume_name: array16(&d[120..136]),
-            s_last_mounted: FsPath::new(array64(&d[136..200])),
-            s_algo_bitmap: LE::read_u32(&d[200..204]),
+            s_inodes_count: LE::read_u32(&data[0..4]),
+            s_blocks_count: LE::read_u32(&data[4..8]), //LE::read_u32(&d[])?,
+            s_r_blocks_count: LE::read_u32(&data[8..12]), // LE::read_u32(&d[])?,
+            s_free_blocks_count: LE::read_u32(&data[12..16]),
+            s_free_inodes_count: LE::read_u32(&data[16..20]),
+            s_first_data_block: LE::read_u32(&data[20..24]),
+            s_log_block_size: LE::read_u32(&data[24..28]),
+            s_log_frag_size: LE::read_u32(&data[28..32]),
+            s_blocks_per_group: LE::read_u32(&data[32..36]),
+            s_frags_per_group: LE::read_u32(&data[36..40]),
+            s_inodes_per_group: LE::read_u32(&data[40..44]),
+            s_mtime: LE::read_u32(&data[44..48]),
+            s_wtime: LE::read_u32(&data[48..52]),
+            s_mnt_count: LE::read_u16(&data[52..54]),
+            s_max_mnt_count: LE::read_u16(&data[54..56]),
+            s_magic: LE::read_u16(&data[56..58]),
+            s_state: LE::read_u16(&data[58..60]),
+            s_errors: LE::read_u16(&data[60..62]),
+            s_minor_rev_level: LE::read_u16(&data[62..64]),
+            s_lastcheck: LE::read_u32(&data[64..68]),
+            s_checkinterval: LE::read_u32(&data[68..72]),
+            s_creator_os: LE::read_u32(&data[72..76]),
+            s_rev_level: LE::read_u32(&data[76..80]),
+            s_def_resuid: LE::read_u16(&data[80..82]),
+            s_def_resgid: LE::read_u16(&data[82..84]),
+            s_first_ino: LE::read_u32(&data[84..88]),
+            s_inode_size: LE::read_u16(&data[88..90]),
+            s_block_group_nr: LE::read_u16(&data[90..92]),
+            s_feature_compat: LE::read_u32(&data[92..96]),
+            s_feature_incompat: LE::read_u32(&data[96..100]),
+            s_feature_ro_compat: LE::read_u32(&data[100..104]),
+            s_uuid: uuid::Uuid::from_slice(&data[104..120]).unwrap(),
+            s_volume_name: array16(&data[120..136]),
+            s_last_mounted: FsPath::new(array64(&data[136..200])),
+            s_algo_bitmap: LE::read_u32(&data[200..204]),
             // Performance hints
-            s_prealloc_blocks: d[204],
-            s_prealloc_dir_blocks: d[205],
-            _align: (d[206], d[207]),
+            s_prealloc_blocks: data[204],
+            s_prealloc_dir_blocks: data[205],
+            _align: (data[206], data[207]),
             // Journaling support
-            s_journal_uuid: uuid::Uuid::from_slice(&d[208..224]).unwrap(),
-            s_journal_inum: LE::read_u32(&d[224..228]),
-            s_journal_dev: LE::read_u32(&d[228..232]),
-            s_last_orphan: LE::read_u32(&d[232..236]),
+            s_journal_uuid: uuid::Uuid::from_slice(&data[208..224]).unwrap(),
+            s_journal_inum: LE::read_u32(&data[224..228]),
+            s_journal_dev: LE::read_u32(&data[228..232]),
+            s_last_orphan: LE::read_u32(&data[232..236]),
             // Directory indexing support
             s_hash_seed: [
-                LE::read_u32(&d[236..240]),
-                LE::read_u32(&d[240..244]),
-                LE::read_u32(&d[244..248]),
-                LE::read_u32(&d[248..252]),
+                LE::read_u32(&data[236..240]),
+                LE::read_u32(&data[240..244]),
+                LE::read_u32(&data[244..248]),
+                LE::read_u32(&data[248..252]),
             ],
-            s_def_hash_version: d[252],
-            _hash_version_align: (d[253], d[254], d[255]),
+            s_def_hash_version: data[252],
+            _hash_version_align: (data[253], data[254], data[255]),
             // Other options
-            s_default_mount_options: LE::read_u32(&d[256..260]),
-            s_first_meta_bg: LE::read_u32(&d[260..264]),
+            s_default_mount_options: LE::read_u32(&data[256..260]),
+            s_first_meta_bg: LE::read_u32(&data[260..264]),
         })
     }
 
@@ -294,19 +294,20 @@ pub struct BlockGroupDescriptor {
 }
 
 impl BlockGroupDescriptor {
-    pub fn new(d: &[u8]) -> io::Result<BlockGroupDescriptor> {
-        if d.len() != 32 {
+
+    pub fn new(data: &[u8]) -> io::Result<BlockGroupDescriptor> {
+        if data.len() != 32 {
             panic!("BlockGroupDescriptors must be 32 bytes in length");
         }
         Ok(BlockGroupDescriptor {
-            bg_block_bitmap: LE::read_u32(&d[0..4]),
-            bg_inode_bitmap: LE::read_u32(&d[4..8]),
-            bg_inode_table: LE::read_u32(&d[8..12]),
-            bg_free_blocks_count: LE::read_u16(&d[12..14]),
-            bg_free_inodes_count: LE::read_u16(&d[14..16]),
-            bg_used_dirs_count: LE::read_u16(&d[16..18]),
-            bg_pad: LE::read_u16(&d[18..20]),
-            bg_reserved: array12(&d[20..32]),
+            bg_block_bitmap: LE::read_u32(&data[0..4]),
+            bg_inode_bitmap: LE::read_u32(&data[4..8]),
+            bg_inode_table: LE::read_u32(&data[8..12]),
+            bg_free_blocks_count: LE::read_u16(&data[12..14]),
+            bg_free_inodes_count: LE::read_u16(&data[14..16]),
+            bg_used_dirs_count: LE::read_u16(&data[16..18]),
+            bg_pad: LE::read_u16(&data[18..20]),
+            bg_reserved: array12(&data[20..32]),
         })
     }
 }
@@ -326,7 +327,7 @@ pub struct Inode {
     pub i_blocks: u32,
     pub i_flags: u32,
     pub i_osd1: u32,
-    pub i_block: [u32; 15],
+    pub i_block: ([u32; 12], u32, u32, u32),
     pub i_generation: u32,
     pub i_file_acl: u32,
     pub i_dir_acl: u32,
@@ -336,7 +337,44 @@ pub struct Inode {
 
 impl Inode {
     pub fn new(data: &[u8]) -> io::Result<Inode> {
-        Ok(Inode::default())
+        Ok(Inode {
+            i_mode: LE::read_u16(&data[0..2]),
+            i_uid: LE::read_u16(&data[2..4]),
+            i_size: LE::read_u32(&data[4..8]),
+            i_atime: LE::read_u32(&data[8..12]),
+            i_ctime: LE::read_u32(&data[12..16]),
+            i_mtime: LE::read_u32(&data[16..20]),
+            i_dtime: LE::read_u32(&data[20..24]),
+            i_gid: LE::read_u16(&data[24..26]),
+            i_links_count: LE::read_u16(&data[26..28]),
+            i_blocks: LE::read_u32(&data[28..32]),
+            i_flags: LE::read_u32(&data[32..36]),
+            i_osd1: LE::read_u32(&data[36..40]),
+            i_block: (
+                [
+                    LE::read_u32(&data[ 40..44]),
+                    LE::read_u32(&data[ 44..48]),
+                    LE::read_u32(&data[ 52..56]),
+                    LE::read_u32(&data[ 48..52]),
+                    LE::read_u32(&data[ 56..60]),
+                    LE::read_u32(&data[ 60..64]),
+                    LE::read_u32(&data[ 64..68]),
+                    LE::read_u32(&data[ 68..72]),
+                    LE::read_u32(&data[ 72..76]),
+                    LE::read_u32(&data[ 76..80]),
+                    LE::read_u32(&data[ 80..84]),
+                    LE::read_u32(&data[ 84..88]),
+                ],
+                LE::read_u32(&data[88..92 ]),
+                LE::read_u32(&data[92..96 ]),
+                LE::read_u32(&data[96..100 ]),
+            ),
+            i_generation: LE::read_u32(&data[100..104]),
+            i_file_acl: LE::read_u32(&data[104..108]),
+            i_dir_acl: LE::read_u32(&data[108..112]),
+            i_faddr: LE::read_u32(&data[112..116]),
+            i_osd2: array12(&data[116..128]),
+        })
     }
 }
 #[cfg(test)]

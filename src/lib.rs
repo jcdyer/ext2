@@ -53,31 +53,43 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(Ext2(disk))
     }
 
-    pub fn superblock(&mut self) -> io::Result<Superblock> {
-        let mut block = [0; 4096];
-        self.0.read_block(0, &mut block)?;
-        Superblock::new(&block[1024..2048])
+    pub fn read_block(&mut self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
+        let block_size = sb.block_size();
+        if buf.len() < block_size as usize {
+            panic!("Must provide a buffer of size {}", block_size);
+        }
+        let sectors_per_block = block_size / 512;
+        let start_sector = sectors_per_block * blocknum;
+        for i in 0..sectors_per_block {
+            let start = (i * 512) as usize;
+            let end = start + 512;
+            self.0.read_sector((start_sector + i) as u64, &mut buf[start..end])?;
+        }
+        Ok(())
     }
 
-    pub fn block_group_descriptor_table(
-        &mut self,
-        sb: &Superblock,
-    ) -> io::Result<Vec<BlockGroupDescriptor>> {
-        let ct = sb.block_group_count();
-        let bs = sb.block_size();
-        let mut block = vec![0; bs as usize];
-        self.0.read_block(1, &mut block)?;
+    pub fn superblock(&mut self) -> io::Result<Superblock> {
+        let mut block = [0; 1024];
+        self.0.read_sector(2, &mut block[..512])?;
+        self.0.read_sector(3, &mut block[512..])?;
+        Superblock::new(&block[..])
+    }
 
-        if ct * 32 > bs {
-            panic!("Handling multi-block not implemented");
+    pub fn first_descriptor_block(&mut self, sb: &Superblock) -> u32 {
+        if sb.block_size() == 1024 { 2 } else { 1 }
+    }
+
+    pub fn get_block_group_descriptor(&mut self, groupnum: u32, sb: &Superblock) -> io::Result<Option<BlockGroupDescriptor>> {
+        if groupnum > sb.block_group_count() {
+            Ok(None)
+        } else {
+            let bs = sb.block_size();
+            let descriptor_block = (groupnum * 32) / bs + self.first_descriptor_block(&sb);
+            let offset = ((groupnum * 32) % bs) as usize;
+            let mut buf = vec![0; bs as usize];
+            self.read_block(descriptor_block, &mut buf, &sb)?;
+            Ok(Some(BlockGroupDescriptor::new(&buf[offset..offset + 32])?))
         }
-        let mut vec = Vec::with_capacity(ct as usize);
-        let mut offset = 0;
-        for _i in 0..ct {
-            vec.push(BlockGroupDescriptor::new(&block[offset..offset + 32])?);
-            offset += 32;
-        }
-        Ok(vec)
     }
 }
 
@@ -275,6 +287,28 @@ impl BlockGroupDescriptor {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Inode {
+    pub i_mode: u16,
+    pub i_uid: u16,
+    pub i_size: u32,
+    pub i_atime: u32,
+    pub i_ctime: u32,
+    pub i_mtime: u32,
+    pub i_dtime: u32,
+    pub i_gid: u16,
+    pub i_links_count: u16,
+    pub i_blocks: u32,
+    pub i_flags: u32,
+    pub i_osd1: u32,
+    pub i_block: [u32; 15],
+    pub i_generation: u32,
+    pub i_file_acl: u32,
+    pub i_dir_acl: u32,
+    pub i_faddr: u32,
+    pub i_osd2: [u8; 12],
+}
 #[cfg(test)]
 mod tests {
     #[test]

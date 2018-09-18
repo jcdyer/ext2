@@ -74,7 +74,7 @@ fn basic_superblock() {
 fn basic_descriptor() {
     let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
     let superblock = fs.superblock().unwrap();
-    let table = fs.block_group_descriptor_table(&superblock).unwrap();
+    let descriptor = fs.get_block_group_descriptor(0, &superblock).unwrap();
     let expected = BlockGroupDescriptor {
         bg_block_bitmap: 2,
         bg_inode_bitmap: 3,
@@ -85,5 +85,6 @@ fn basic_descriptor() {
         bg_pad: 4,
         bg_reserved: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     };
-    assert_eq!(table, vec![expected])
+    assert_eq!(descriptor, Some(expected));
+    assert!(fs.get_block_group_descriptor(9999, &superblock).unwrap().is_none());
 }

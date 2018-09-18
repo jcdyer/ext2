@@ -144,6 +144,34 @@ impl<T: disk::Disk> Ext2<T> {
         self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
     }
 
+    pub fn get_block_ptr(&mut self, inode: &Inode, ptr: u32, sb: &Superblock) -> io::Result<u32> {
+        let blocksize = sb.block_size();
+        let inodes_per_block = blocksize / sb.inode_size();
+        let direct_limit = 12;
+        let single_limit = direct_limit + inodes_per_block;
+        let double_limit = single_limit + inodes_per_block * inodes_per_block;
+        let triple_limit = double_limit + inodes_per_block * inodes_per_block * inodes_per_block;
+
+        let node = if ptr < direct_limit {
+             inode.i_block.0[ptr as usize]
+        } else if ptr < single_limit {
+            let mut buf = vec![0; sb.block_size() as usize];
+            self.read_block(inode.i_block.1, &mut buf, sb)?;
+            let ptr = (ptr - 12) as usize;
+            LE::read_u32(&buf[ptr * 4..(ptr + 1) * 4])
+        } else if ptr < double_limit {
+            unimplemented!()
+        } else if ptr < triple_limit {
+            unimplemented!()
+        } else {
+            0
+        };
+        match node {
+            0 => Err(io::Error::new(io::ErrorKind::Other, "Not found")),
+            x => Ok(x),
+        }
+    }
+
     /// TODO: Handle multiple block directories.
     pub fn read_dir(
         &mut self,
@@ -172,31 +200,14 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     /// Todo: Fix calculation of blocks to be read.
-    pub fn read_file(&mut self, inode: &Inode, sb: &Superblock) -> Option<io::Result<Vec<u8>>> {
+    pub fn read_file_block(&mut self, inode: &Inode, buf: &mut [u8], idx: u32, sb: &Superblock) -> io::Result<usize> {
         match inode.file_type() {
             FileType::File => {
-                let mut buf = vec![0; 512 * inode.i_blocks as usize];
-                let mut bufstart = 0;
-                for ptr in 0..12 {
-                    if inode.i_block.0[ptr] == 0 {
-                        break;
-                    }
-                    let res = self.read_block(
-                        inode.i_block.0[ptr],
-                        &mut buf[bufstart..bufstart + sb.block_size() as usize],
-                        sb,
-                    );
-                    match res {
-                        Ok(()) => {}
-                        Err(error) => {
-                            return Some(Err(error));
-                        }
-                    }
-                    bufstart += sb.block_size() as usize;
-                }
-                Some(Ok(buf))
+                let ptr = self.get_block_ptr(inode, idx, sb)?;
+                self.read_block(ptr, buf, sb)
+                    .map(|()| sb.block_size() as usize)
             }
-            _ => None,
+            _ => Err(io::Error::new(io::ErrorKind::Other, "Not found")),
         }
     }
 }
@@ -338,7 +349,7 @@ impl Superblock {
         (index, offset)
     }
 
-    fn block_size(&self) -> u32 {
+    pub fn block_size(&self) -> u32 {
         1024 << self.s_log_block_size
     }
 
@@ -463,6 +474,10 @@ impl Inode {
 
     pub fn size(&self) -> u64 {
         (self.i_dir_acl as u64) << 32 + self.i_size as u64
+    }
+
+    pub fn block_count(&self, sb: &Superblock) -> u32 {
+        self.i_blocks / 2 << sb.s_log_block_size
     }
 }
 

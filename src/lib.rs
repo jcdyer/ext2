@@ -63,7 +63,8 @@ impl<T: disk::Disk> Ext2<T> {
         for i in 0..sectors_per_block {
             let start = (i * 512) as usize;
             let end = start + 512;
-            self.0.read_sector((start_sector + i) as u64, &mut buf[start..end])?;
+            self.0
+                .read_sector((start_sector + i) as u64, &mut buf[start..end])?;
         }
         Ok(())
     }
@@ -76,10 +77,18 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     pub fn first_descriptor_block(&mut self, sb: &Superblock) -> u32 {
-        if sb.block_size() == 1024 { 2 } else { 1 }
+        if sb.block_size() == 1024 {
+            2
+        } else {
+            1
+        }
     }
 
-    pub fn get_block_group_descriptor(&mut self, groupnum: u32, sb: &Superblock) -> io::Result<Option<BlockGroupDescriptor>> {
+    pub fn get_block_group_descriptor(
+        &mut self,
+        groupnum: u32,
+        sb: &Superblock,
+    ) -> io::Result<Option<BlockGroupDescriptor>> {
         if groupnum > sb.block_group_count() {
             Ok(None)
         } else {
@@ -93,13 +102,15 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     pub fn get_inode(&mut self, inode: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
-        let (igroup, ioffset) = sb.locate_inode(inode, &sb);
+        let (igroup, ioffset) = sb.locate_inode(inode);
         let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap(); // Should check for valid Inode
         let iblock = descriptor.bg_inode_table + (ioffset * sb.inode_size()) / sb.block_size();
         let iblock_offset = ((ioffset * sb.inode_size()) % sb.block_size()) as usize;
         let mut buf = vec![0; sb.block_size() as usize];
-        self.read_block(iblock, &mut buf[..], &sb);
-        Ok(Some(Inode::new(&buf[iblock_offset..iblock_offset + sb.inode_size() as usize])?))
+        self.read_block(iblock, &mut buf[..], &sb)?;
+        Ok(Some(Inode::new(
+            &buf[iblock_offset..iblock_offset + sb.inode_size() as usize],
+        )?))
     }
 }
 
@@ -261,7 +272,7 @@ impl Superblock {
             }
     }
 
-    pub fn locate_inode(&self, inode: u32, sb: &Superblock) -> (u32, u32) {
+    pub fn locate_inode(&self, inode: u32) -> (u32, u32) {
         let index = (inode - 1) / self.s_inodes_per_group;
         let offset = (inode - 1) % self.s_inodes_per_group;
         (index, offset)
@@ -294,7 +305,6 @@ pub struct BlockGroupDescriptor {
 }
 
 impl BlockGroupDescriptor {
-
     pub fn new(data: &[u8]) -> io::Result<BlockGroupDescriptor> {
         if data.len() != 32 {
             panic!("BlockGroupDescriptors must be 32 bytes in length");
@@ -352,22 +362,22 @@ impl Inode {
             i_osd1: LE::read_u32(&data[36..40]),
             i_block: (
                 [
-                    LE::read_u32(&data[ 40..44]),
-                    LE::read_u32(&data[ 44..48]),
-                    LE::read_u32(&data[ 52..56]),
-                    LE::read_u32(&data[ 48..52]),
-                    LE::read_u32(&data[ 56..60]),
-                    LE::read_u32(&data[ 60..64]),
-                    LE::read_u32(&data[ 64..68]),
-                    LE::read_u32(&data[ 68..72]),
-                    LE::read_u32(&data[ 72..76]),
-                    LE::read_u32(&data[ 76..80]),
-                    LE::read_u32(&data[ 80..84]),
-                    LE::read_u32(&data[ 84..88]),
+                    LE::read_u32(&data[40..44]),
+                    LE::read_u32(&data[44..48]),
+                    LE::read_u32(&data[52..56]),
+                    LE::read_u32(&data[48..52]),
+                    LE::read_u32(&data[56..60]),
+                    LE::read_u32(&data[60..64]),
+                    LE::read_u32(&data[64..68]),
+                    LE::read_u32(&data[68..72]),
+                    LE::read_u32(&data[72..76]),
+                    LE::read_u32(&data[76..80]),
+                    LE::read_u32(&data[80..84]),
+                    LE::read_u32(&data[84..88]),
                 ],
-                LE::read_u32(&data[88..92 ]),
-                LE::read_u32(&data[92..96 ]),
-                LE::read_u32(&data[96..100 ]),
+                LE::read_u32(&data[88..92]),
+                LE::read_u32(&data[92..96]),
+                LE::read_u32(&data[96..100]),
             ),
             i_generation: LE::read_u32(&data[100..104]),
             i_file_acl: LE::read_u32(&data[104..108]),
@@ -376,7 +386,37 @@ impl Inode {
             i_osd2: array12(&data[116..128]),
         })
     }
+
+    pub fn file_type(&self) -> FileType {
+        use FileType::*;
+        match self.i_mode & 0xf000 {
+            0x1000 => FIFO,
+            0x2000 => CharDev,
+            0x4000 => Directory,
+            0x6000 => BlockDev,
+            0x8000 => File,
+            0xa000 => SymLink,
+            0xc000 => UnixSocket,
+            x => panic!("Invalid file_type: 0x{:x}", x),
+        }
+    }
+
+    pub fn size(&self) -> u64 {
+        (self.i_dir_acl as u64) << 32 + self.i_size as u64
+    }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileType {
+    FIFO,
+    CharDev,
+    Directory,
+    BlockDev,
+    File,
+    SymLink,
+    UnixSocket,
+}
+
 #[cfg(test)]
 mod tests {
 

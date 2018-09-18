@@ -5,7 +5,7 @@ extern crate uuid;
 
 use std::fs::File;
 
-use ext2::{BlockGroupDescriptor, Ext2, FsPath, Inode, Superblock};
+use ext2::{BlockGroupDescriptor, Ext2, FileType, FsPath, Inode, Superblock};
 use uuid::Uuid;
 
 #[test]
@@ -86,16 +86,41 @@ fn basic_descriptor() {
         bg_reserved: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     };
     assert_eq!(descriptor, Some(expected));
-    assert!(fs.get_block_group_descriptor(9999, &superblock).unwrap().is_none());
+    assert!(
+        fs.get_block_group_descriptor(9999, &superblock)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
 fn basic_inode() {
     let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
     let superblock = fs.superblock().unwrap();
-    let inode = fs.get_inode(2, &superblock).unwrap();
-    let expected = Inode { i_mode: 16877, i_uid: 0, i_size: 4096, i_atime: 1537149907, i_ctime: 1537149905, i_mtime: 1537149905, i_dtime: 0, i_gid: 0, i_links_count: 4, i_blocks: 8, i_flags: 0, i_osd1: 3, i_block: ([5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0), i_generation: 0, i_file_acl: 0, i_dir_acl: 0, i_faddr: 0, i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] };
-    assert_eq!(inode, Some(expected));
-
+    let inode = fs.get_inode(2, &superblock).unwrap().unwrap();
+    let expected = Inode {
+        i_mode: 16877,
+        i_uid: 0,
+        i_size: 4096,
+        i_atime: 1537149907,
+        i_ctime: 1537149905,
+        i_mtime: 1537149905,
+        i_dtime: 0,
+        i_gid: 0,
+        i_links_count: 4,
+        i_blocks: 8,
+        i_flags: 0,
+        i_osd1: 3,
+        i_block: ([5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0),
+        i_generation: 0,
+        i_file_acl: 0,
+        i_dir_acl: 0,
+        i_faddr: 0,
+        i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    };
+    assert_eq!(inode, expected);
+    assert_eq!(inode.file_type(), FileType::Directory);
 }
 
+#[test]
+fn basic_directory() {}

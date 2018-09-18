@@ -144,7 +144,27 @@ impl<T: disk::Disk> Ext2<T> {
         self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
     }
 
-    pub fn get_block_ptr(&mut self, inode: &Inode, ptr: u32, sb: &Superblock) -> io::Result<u32> {
+    fn find_ptr(&mut self, nextptr: u32, offset: u32, level: u32, sb: &Superblock) -> io::Result<u32> {
+        if level == 0 {
+            Ok(nextptr)
+        } else {
+            let mut buf = vec![0; sb.block_size() as usize];
+            self.read_block(nextptr, &mut buf, sb)?;
+            let ptrs_per_block = sb.block_size() / 4;
+            let ptrs_per_bucket = ptrs_per_block.pow(level); // TODO: Find syntax for this.
+            let this_offset = (offset / ptrs_per_bucket) as usize;
+            let next_offset = offset % ptrs_per_bucket;
+
+            self.find_ptr(
+                LE::read_u32(&buf[this_offset * 4..(this_offset + 1) * 4]),
+                next_offset,
+                level - 1,
+                sb,
+            )
+        }
+    }
+
+    pub fn get_block_ptr(&mut self, inode: &Inode, idx: u32, sb: &Superblock) -> io::Result<u32> {
         let blocksize = sb.block_size();
         let inodes_per_block = blocksize / sb.inode_size();
         let direct_limit = 12;
@@ -152,17 +172,19 @@ impl<T: disk::Disk> Ext2<T> {
         let double_limit = single_limit + inodes_per_block * inodes_per_block;
         let triple_limit = double_limit + inodes_per_block * inodes_per_block * inodes_per_block;
 
-        let node = if ptr < direct_limit {
-             inode.i_block.0[ptr as usize]
-        } else if ptr < single_limit {
-            let mut buf = vec![0; sb.block_size() as usize];
-            self.read_block(inode.i_block.1, &mut buf, sb)?;
-            let ptr = (ptr - 12) as usize;
-            LE::read_u32(&buf[ptr * 4..(ptr + 1) * 4])
-        } else if ptr < double_limit {
-            unimplemented!()
-        } else if ptr < triple_limit {
-            unimplemented!()
+        let node = if idx < direct_limit {
+            let level = 0;
+            self.find_ptr(inode.i_block.0[idx as usize], idx, level, sb)?
+        } else if idx < single_limit {
+            let level = 1;
+            self.find_ptr(inode.i_block.1, idx - direct_limit, level, sb)?
+
+        } else if idx < double_limit {
+            let level = 2;
+            self.find_ptr(inode.i_block.2, idx - single_limit, level, sb)?
+        } else if idx < triple_limit {
+            let level = 3;
+            self.find_ptr(inode.i_block.3, idx - double_limit, level, sb)?
         } else {
             0
         };

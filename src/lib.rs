@@ -91,6 +91,16 @@ impl<T: disk::Disk> Ext2<T> {
             Ok(Some(BlockGroupDescriptor::new(&buf[offset..offset + 32])?))
         }
     }
+
+    pub fn get_inode(&mut self, inode: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
+        let (igroup, ioffset) = sb.locate_inode(inode, &sb);
+        let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap(); // Should check for valid Inode
+        let iblock = descriptor.bg_inode_table + (ioffset * sb.inode_size()) / sb.block_size();
+        let iblock_offset = ((ioffset * sb.inode_size()) % sb.block_size()) as usize;
+        let mut buf = vec![0; sb.block_size() as usize];
+        self.read_block(iblock, &mut buf[..], &sb);
+        Ok(Some(Inode::new(&buf[iblock_offset..iblock_offset + sb.inode_size() as usize])?))
+    }
 }
 
 /// Ext2 superblock struct.
@@ -251,8 +261,22 @@ impl Superblock {
             }
     }
 
+    pub fn locate_inode(&self, inode: u32, sb: &Superblock) -> (u32, u32) {
+        let index = (inode - 1) / self.s_inodes_per_group;
+        let offset = (inode - 1) % self.s_inodes_per_group;
+        (index, offset)
+    }
+
     pub fn block_size(&self) -> u32 {
         1024 << self.s_log_block_size
+    }
+
+    fn inode_size(&self) -> u32 {
+        if self.s_rev_level > 0 {
+            self.s_inode_size as u32
+        } else {
+            128
+        }
     }
 }
 
@@ -309,8 +333,15 @@ pub struct Inode {
     pub i_faddr: u32,
     pub i_osd2: [u8; 12],
 }
+
+impl Inode {
+    pub fn new(data: &[u8]) -> io::Result<Inode> {
+        Ok(Inode::default())
+    }
+}
 #[cfg(test)]
 mod tests {
+
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);

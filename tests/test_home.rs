@@ -5,7 +5,7 @@ extern crate uuid;
 
 use std::fs::File;
 
-use ext2::{BlockGroupDescriptor, Ext2, FsPath, Superblock};
+use ext2::{BlockGroupDescriptor, Ext2, FsPath, Inode, Superblock};
 use uuid::Uuid;
 
 #[test]
@@ -88,3 +88,14 @@ fn basic_descriptor() {
     assert_eq!(descriptor, Some(expected));
     assert!(fs.get_block_group_descriptor(9999, &superblock).unwrap().is_none());
 }
+
+#[test]
+fn basic_inode() {
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let superblock = fs.superblock().unwrap();
+    let inode = fs.get_inode(2, &superblock).unwrap();
+    assert_eq!(inode, Some(Inode::default()));
+    assert!(false, "Inodes not properly constructed")
+
+}
+

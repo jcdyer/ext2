@@ -8,6 +8,33 @@ use byteorder::{ByteOrder, LE};
 
 mod disk;
 
+fn array64(input: &[u8]) -> [u8; 64] {
+    let mut a = [0; 64];
+    copy_array(input, &mut a[..]);
+    a
+}
+
+fn array16(input: &[u8]) -> [u8; 16] {
+    let mut a = [0; 16];
+    copy_array(input, &mut a[..]);
+    a
+}
+
+fn array12(input: &[u8]) -> [u8; 12] {
+    let mut a = [0; 12];
+    copy_array(input, &mut a[..]);
+    a
+}
+
+fn copy_array(input: &[u8], output: &mut [u8]) {
+    if input.len() != output.len() {
+        panic!("Requires an input length of {}", output.len());
+    }
+    for i in 0..input.len() {
+        output[i] = input[i];
+    }
+}
+
 #[derive(Clone)]
 pub struct FsPath([u8; 64]);
 
@@ -53,7 +80,7 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(Ext2(disk))
     }
 
-    pub fn read_block(&mut self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
+    fn read_block(&mut self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
         let block_size = sb.block_size();
         if buf.len() < block_size as usize {
             panic!("Must provide a buffer of size {}", block_size);
@@ -143,6 +170,35 @@ impl<T: disk::Disk> Ext2<T> {
             _ => None,
         }
     }
+
+    /// Todo: Fix calculation of blocks to be read.
+    pub fn read_file(&mut self, inode: &Inode, sb: &Superblock) -> Option<io::Result<Vec<u8>>> {
+        match inode.file_type() {
+            FileType::File => {
+                let mut buf = vec![0; 512 * inode.i_blocks as usize];
+                let mut bufstart = 0;
+                for ptr in 0..12 {
+                    if inode.i_block.0[ptr] == 0 {
+                        break;
+                    }
+                    let res = self.read_block(
+                        inode.i_block.0[ptr],
+                        &mut buf[bufstart..bufstart + sb.block_size() as usize],
+                        sb,
+                    );
+                    match res {
+                        Ok(()) => {}
+                        Err(error) => {
+                            return Some(Err(error));
+                        }
+                    }
+                    bufstart += sb.block_size() as usize;
+                }
+                Some(Ok(buf))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Ext2 superblock struct.
@@ -203,33 +259,6 @@ pub struct Superblock {
     // Other options
     pub s_default_mount_options: u32,
     pub s_first_meta_bg: u32,
-}
-
-fn array64(input: &[u8]) -> [u8; 64] {
-    let mut a = [0; 64];
-    copy_array(input, &mut a[..]);
-    a
-}
-
-fn array16(input: &[u8]) -> [u8; 16] {
-    let mut a = [0; 16];
-    copy_array(input, &mut a[..]);
-    a
-}
-
-fn array12(input: &[u8]) -> [u8; 12] {
-    let mut a = [0; 12];
-    copy_array(input, &mut a[..]);
-    a
-}
-
-fn copy_array(input: &[u8], output: &mut [u8]) {
-    if input.len() != output.len() {
-        panic!("Requires an input length of {}", output.len());
-    }
-    for i in 0..input.len() {
-        output[i] = input[i];
-    }
 }
 
 impl Superblock {
@@ -303,13 +332,13 @@ impl Superblock {
             }
     }
 
-    pub fn locate_inode(&self, inode: u32) -> (u32, u32) {
+    fn locate_inode(&self, inode: u32) -> (u32, u32) {
         let index = (inode - 1) / self.s_inodes_per_group;
         let offset = (inode - 1) % self.s_inodes_per_group;
         (index, offset)
     }
 
-    pub fn block_size(&self) -> u32 {
+    fn block_size(&self) -> u32 {
         1024 << self.s_log_block_size
     }
 
@@ -460,7 +489,7 @@ impl DirEntry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u16)]
+#[repr(u8)]
 pub enum FileType {
     Unknown = 0,
     File = 1,

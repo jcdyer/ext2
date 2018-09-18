@@ -41,9 +41,9 @@ fn basic_superblock() {
         s_first_ino: 11,
         s_inode_size: 128,
         s_block_group_nr: 0,
-        s_feature_compat: 56,
-        s_feature_incompat: 2,
-        s_feature_ro_compat: 3,
+        s_feature_compat: 0x38,
+        s_feature_incompat: 0x2,
+        s_feature_ro_compat: 0x3,
         s_uuid: Uuid::from_bytes([
             175, 254, 89, 103, 185, 28, 68, 194, 156, 174, 245, 82, 44, 170, 139, 58
         ]),
@@ -145,4 +145,51 @@ fn basic_directory_entry() {
         filenames,
         vec![".", "..", "lost+found", "hello.txt", "sub", "goodbye.txt"],
     );
+}
+
+#[test]
+fn basic_file_entry() {
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let superblock = fs.superblock().unwrap();
+    let inode = fs.get_root_directory(&superblock).unwrap();
+    let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
+    let file_entry = entries
+        .into_iter()
+        .find(|entry| entry.file_type == FileType::File as u8)
+        .unwrap();
+    let expected_entry = DirEntry {
+        inode: 12,
+        rec_len: 20,
+        name_len: 9,
+        file_type: 1,
+        name: b"hello.txt".to_vec(),
+    };
+    assert_eq!(file_entry, expected_entry);
+    let expected_inode = Inode {
+        i_mode: 33188,
+        i_uid: 0,
+        i_size: 13,
+        i_atime: 1537149548,
+        i_ctime: 1537149548,
+        i_mtime: 1537149548,
+        i_dtime: 0,
+        i_gid: 0,
+        i_links_count: 1,
+        i_blocks: 8,
+        i_flags: 0,
+        i_osd1: 1,
+        i_block: ([11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0),
+        i_generation: 270238708,
+        i_file_acl: 0,
+        i_dir_acl: 0,
+        i_faddr: 0,
+        i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    };
+    let file_inode = fs.get_inode(file_entry.inode, &superblock)
+        .unwrap()
+        .unwrap();
+    assert_eq!(file_inode, expected_inode);
+    let data = fs.read_file(&file_inode, &superblock).unwrap().unwrap();
+    assert_eq!(&String::from_utf8(data).unwrap()[..13], "Hello world!\n");
+
 }

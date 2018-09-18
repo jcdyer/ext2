@@ -112,6 +112,37 @@ impl<T: disk::Disk> Ext2<T> {
             &buf[iblock_offset..iblock_offset + sb.inode_size() as usize],
         )?))
     }
+
+    pub fn get_root_directory(&mut self, sb: &Superblock) -> io::Result<Inode> {
+        self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
+    }
+
+    /// TODO: Handle multiple block directories.
+    pub fn read_dir(
+        &mut self,
+        inode: &Inode,
+        sb: &Superblock,
+    ) -> Option<io::Result<Vec<DirEntry>>> {
+        match inode.file_type() {
+            FileType::Directory => {
+                let mut buf = vec![0; sb.block_size() as usize];
+                let mut vec = Vec::new();
+                Some(self.read_block(inode.i_block.0[0], &mut buf, sb).map(|()| {
+                    let mut start: usize = 0;
+                    while start < sb.block_size() as usize {
+                        let entry = DirEntry::new(&buf[start..sb.block_size() as usize]);
+                        start += entry.rec_len as usize;
+                        if entry.inode == 0 {
+                            assert_eq!(start, sb.block_size() as usize)
+                        }
+                        vec.push(entry);
+                    }
+                    vec
+                }))
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Ext2 superblock struct.
@@ -406,15 +437,39 @@ impl Inode {
     }
 }
 
+/// Can't make this repr(C) because the size would be variable
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DirEntry {
+    pub inode: u32,
+    pub rec_len: u16,
+    pub name_len: u8,
+    pub file_type: u8,
+    pub name: Vec<u8>, // Should this be OsString?
+}
+
+impl DirEntry {
+    pub fn new(data: &[u8]) -> DirEntry {
+        DirEntry {
+            inode: LE::read_u32(&data[0..4]),
+            rec_len: LE::read_u16(&data[4..6]),
+            name_len: data[6],
+            file_type: data[7],
+            name: data[8..8 + data[6] as usize].to_vec(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u16)]
 pub enum FileType {
-    FIFO,
-    CharDev,
-    Directory,
-    BlockDev,
-    File,
-    SymLink,
-    UnixSocket,
+    Unknown = 0,
+    File = 1,
+    Directory = 2,
+    CharDev = 3,
+    BlockDev = 4,
+    FIFO = 5,
+    UnixSocket = 6,
+    SymLink = 7,
 }
 
 #[cfg(test)]

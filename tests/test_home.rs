@@ -5,7 +5,7 @@ extern crate uuid;
 
 use std::fs::File;
 
-use ext2::{BlockGroupDescriptor, Ext2, FileType, FsPath, Inode, Superblock};
+use ext2::{BlockGroupDescriptor, DirEntry, Ext2, FileType, FsPath, Inode, Superblock};
 use uuid::Uuid;
 
 #[test]
@@ -97,7 +97,7 @@ fn basic_descriptor() {
 fn basic_inode() {
     let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
     let superblock = fs.superblock().unwrap();
-    let inode = fs.get_inode(2, &superblock).unwrap().unwrap();
+    let inode = fs.get_root_directory(&superblock).unwrap();
     let expected = Inode {
         i_mode: 16877,
         i_uid: 0,
@@ -123,4 +123,26 @@ fn basic_inode() {
 }
 
 #[test]
-fn basic_directory() {}
+fn basic_directory_entry() {
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let superblock = fs.superblock().unwrap();
+    let inode = fs.get_root_directory(&superblock).unwrap();
+    let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
+    let expected = DirEntry {
+        inode: 2,
+        rec_len: 12,
+        name_len: 1,
+        file_type: 2,
+        name: b".".to_vec(),
+    };
+    assert_eq!(entries.len(), 6);
+    assert_eq!(entries[0], expected);
+    let filenames: Vec<_> = entries
+        .into_iter()
+        .map(|entry| String::from_utf8(entry.name).unwrap())
+        .collect();
+    assert_eq!(
+        filenames,
+        vec![".", "..", "lost+found", "hello.txt", "sub", "goodbye.txt"],
+    );
+}

@@ -26,4 +26,3 @@ fn copy_array(input: &[u8], output: &mut [u8]) {
         output[i] = input[i];
     }
 }
-

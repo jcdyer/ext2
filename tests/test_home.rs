@@ -190,7 +190,8 @@ fn basic_file_entry() {
         .unwrap();
     assert_eq!(file_inode, expected_inode);
     let mut data = vec![0; superblock.block_size() as usize];
-    let read = fs.read_file_block(&file_inode, &mut data, 0, &superblock).unwrap();
+    let read = fs.read_file_block(&file_inode, &mut data, 0, &superblock)
+        .unwrap();
     assert_eq!(read, 4096);
     assert_eq!(&String::from_utf8(data).unwrap()[..13], "Hello world!\n");
 }

@@ -9,7 +9,6 @@ use byteorder::{ByteOrder, LE};
 pub mod disk;
 mod array;
 
-
 #[derive(Clone)]
 pub struct FsPath([u8; 64]);
 
@@ -56,7 +55,11 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     pub fn open(&self, path: &[u8]) -> Ext2Handle {
-        Ext2Handle { fs: self, path, offset: 0 }
+        Ext2Handle {
+            fs: self,
+            path,
+            offset: 0,
+        }
     }
 
     fn read_block(&mut self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
@@ -123,7 +126,13 @@ impl<T: disk::Disk> Ext2<T> {
         self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
     }
 
-    fn find_ptr(&mut self, nextptr: u32, offset: u32, level: u32, sb: &Superblock) -> io::Result<u32> {
+    fn find_ptr(
+        &mut self,
+        nextptr: u32,
+        offset: u32,
+        level: u32,
+        sb: &Superblock,
+    ) -> io::Result<u32> {
         if level == 0 {
             Ok(nextptr)
         } else {
@@ -157,7 +166,6 @@ impl<T: disk::Disk> Ext2<T> {
         } else if idx < single_limit {
             let level = 1;
             self.find_ptr(inode.i_block.1, idx - direct_limit, level, sb)?
-
         } else if idx < double_limit {
             let level = 2;
             self.find_ptr(inode.i_block.2, idx - single_limit, level, sb)?
@@ -201,7 +209,13 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     /// Todo: Fix calculation of blocks to be read.
-    pub fn read_file_block(&mut self, inode: &Inode, buf: &mut [u8], idx: u32, sb: &Superblock) -> io::Result<usize> {
+    pub fn read_file_block(
+        &mut self,
+        inode: &Inode,
+        buf: &mut [u8],
+        idx: u32,
+        sb: &Superblock,
+    ) -> io::Result<usize> {
         match inode.file_type() {
             FileType::File => {
                 let ptr = self.get_block_ptr(inode, idx, sb)?;
@@ -526,7 +540,7 @@ mod tests {
     }
 }
 
-pub struct Ext2Handle<T, 'fs, 'inode> {
+pub struct Ext2Handle<'fs, 'inode, T> {
     fs: &'fs Ext2<T>,
     path: u32,
     inode: &'inode Inode,

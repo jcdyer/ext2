@@ -4,13 +4,15 @@ extern crate ext2;
 extern crate uuid;
 
 use std::fs::File;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 
 use ext2::{BlockGroupDescriptor, DirEntry, Ext2, FileType, FsPath, Inode, Superblock};
 use uuid::Uuid;
 
 #[test]
 fn basic_superblock() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let expected = Superblock {
         s_inodes_count: 32,
@@ -72,7 +74,7 @@ fn basic_superblock() {
 
 #[test]
 fn basic_descriptor() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let descriptor = fs.get_block_group_descriptor(0, &superblock).unwrap();
     let expected = BlockGroupDescriptor {
@@ -95,7 +97,7 @@ fn basic_descriptor() {
 
 #[test]
 fn basic_inode() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let inode = fs.get_root_directory(&superblock).unwrap();
     let expected = Inode {
@@ -124,7 +126,7 @@ fn basic_inode() {
 
 #[test]
 fn basic_directory_entry() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let inode = fs.get_root_directory(&superblock).unwrap();
     let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
@@ -133,13 +135,13 @@ fn basic_directory_entry() {
         rec_len: 12,
         name_len: 1,
         file_type: 2,
-        name: b".".to_vec(),
+        name: OsStr::from_bytes(b".").to_os_string(),
     };
     assert_eq!(entries.len(), 6);
     assert_eq!(entries[0], expected);
     let filenames: Vec<_> = entries
         .into_iter()
-        .map(|entry| String::from_utf8(entry.name).unwrap())
+        .map(|entry| entry.name)
         .collect();
     assert_eq!(
         filenames,
@@ -149,7 +151,7 @@ fn basic_directory_entry() {
 
 #[test]
 fn basic_file_entry() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::open).unwrap();
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let inode = fs.get_root_directory(&superblock).unwrap();
     let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
@@ -162,7 +164,7 @@ fn basic_file_entry() {
         rec_len: 20,
         name_len: 9,
         file_type: 1,
-        name: b"hello.txt".to_vec(),
+        name: OsStr::from_bytes(b"hello.txt").to_os_string(),
     };
     assert_eq!(file_entry, expected_entry);
     let expected_inode = Inode {
@@ -190,8 +192,18 @@ fn basic_file_entry() {
         .unwrap();
     assert_eq!(file_inode, expected_inode);
     let mut data = vec![0; superblock.block_size() as usize];
-    let read = fs.read_file_block(&file_inode, &mut data, 0, &superblock)
+    let read = fs.read_inode_data_block(&file_inode, &mut data, 0, &superblock)
         .unwrap();
     assert_eq!(read, 4096);
     assert_eq!(&String::from_utf8(data).unwrap()[..13], "Hello world!\n");
+}
+
+#[test]
+fn get_inode_from_directory() {
+    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let superblock = fs.superblock().unwrap();
+    assert_eq!(
+        fs.get_inode_from_abspath("/".as_ref(), &superblock).unwrap().unwrap(),
+        fs.get_root_directory(&superblock).unwrap(),
+    );
 }

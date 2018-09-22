@@ -2,67 +2,35 @@ extern crate byteorder;
 extern crate uuid;
 
 use std::cmp::PartialEq;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Component, Path};
+use std::sync::Mutex;
 use byteorder::{ByteOrder, LE};
 
 pub mod disk;
 mod array;
 
-#[derive(Clone)]
-pub struct FsPath([u8; 64]);
-
-impl FsPath {
-    pub fn new(val: [u8; 64]) -> FsPath {
-        FsPath(val)
-    }
-}
-
-impl fmt::Debug for FsPath {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, r#"FsPath::new({:?})"#, &self.0[..])
-    }
-}
-
-impl Default for FsPath {
-    fn default() -> FsPath {
-        FsPath::new([0; 64])
-    }
-}
-
-impl PartialEq for FsPath {
-    /// FsTitle compares equal if the elements match through the first null byte
-    fn eq(&self, other: &FsPath) -> bool {
-        for i in 0..64 {
-            if self.0[i] != other.0[i] {
-                return false;
-            } else if self.0[i] == 0 {
-                return true;
-            }
-        }
-        true
-    }
-}
-
-impl Eq for FsPath {}
-
-pub struct Ext2<T: disk::Disk>(T);
+pub struct Ext2<T: disk::Disk>(Mutex<T>);
 
 /// Ext2 Filesystem
 impl<T: disk::Disk> Ext2<T> {
     pub fn new(disk: T) -> io::Result<Ext2<T>> {
-        Ok(Ext2(disk))
+        Ok(Ext2(Mutex::new(disk)))
     }
 
-    pub fn open(&self, path: &[u8]) -> Ext2Handle {
+    pub fn open<'fs, 'path>(&'fs self, path: &'path Path) -> Ext2Handle<'fs, 'path, T> {
         Ext2Handle {
             fs: self,
             path,
+            inode: Inode::default(),
             offset: 0,
         }
     }
 
-    fn read_block(&mut self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
+    fn read_block(&self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
         let block_size = sb.block_size();
         if buf.len() < block_size as usize {
             panic!("Must provide a buffer of size {}", block_size);
@@ -73,19 +41,26 @@ impl<T: disk::Disk> Ext2<T> {
             let start = (i * 512) as usize;
             let end = start + 512;
             self.0
+                .lock()
+                .expect("Got a poisoned mutex.  Cannot recover")
                 .read_sector((start_sector + i) as u64, &mut buf[start..end])?;
         }
         Ok(())
     }
 
-    pub fn superblock(&mut self) -> io::Result<Superblock> {
+    pub fn superblock(&self) -> io::Result<Superblock> {
         let mut block = [0; 1024];
-        self.0.read_sector(2, &mut block[..512])?;
-        self.0.read_sector(3, &mut block[512..])?;
+        {
+            let mut disk = self.0
+                .lock()
+                .expect("Got a poisoned mutex.  Cannot recover");
+            disk.read_sector(2, &mut block[..512])?;
+            disk.read_sector(3, &mut block[512..])?;
+        }
         Superblock::new(&block[..])
     }
 
-    pub fn first_descriptor_block(&mut self, sb: &Superblock) -> u32 {
+    pub fn first_descriptor_block(&self, sb: &Superblock) -> u32 {
         if sb.block_size() == 1024 {
             2
         } else {
@@ -94,7 +69,7 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     pub fn get_block_group_descriptor(
-        &mut self,
+        &self,
         groupnum: u32,
         sb: &Superblock,
     ) -> io::Result<Option<BlockGroupDescriptor>> {
@@ -110,8 +85,8 @@ impl<T: disk::Disk> Ext2<T> {
         }
     }
 
-    pub fn get_inode(&mut self, inode: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
-        let (igroup, ioffset) = sb.locate_inode(inode);
+    pub fn get_inode(&self, iptr: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
+        let (igroup, ioffset) = sb.locate_inode(iptr);
         let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap(); // Should check for valid Inode
         let iblock = descriptor.bg_inode_table + (ioffset * sb.inode_size()) / sb.block_size();
         let iblock_offset = ((ioffset * sb.inode_size()) % sb.block_size()) as usize;
@@ -122,17 +97,54 @@ impl<T: disk::Disk> Ext2<T> {
         )?))
     }
 
-    pub fn get_root_directory(&mut self, sb: &Superblock) -> io::Result<Inode> {
+    pub fn get_root_directory(&self, sb: &Superblock) -> io::Result<Inode> {
         self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
     }
 
-    fn find_ptr(
-        &mut self,
-        nextptr: u32,
-        offset: u32,
-        level: u32,
+    pub fn get_inode_from_abspath(
+        &self,
+        path: &Path,
         sb: &Superblock,
-    ) -> io::Result<u32> {
+    ) -> io::Result<Option<Inode>> {
+        assert!(
+            path.is_absolute(),
+            "This library only supports absolute paths."
+        );
+        let mut inode = Inode::default();
+        for component in path.components() {
+            match component {
+                Component::RootDir => inode = self.get_root_directory(sb)?,
+                Component::Prefix(_) => {
+                    panic!("Prefix found in path.  I don't speak Windows");
+                }
+                component => {
+                    inode = match self.get_inode_in_dir(&inode, component.as_os_str(), sb)? {
+                        Some(inode) => inode,
+                        None => return Ok(None),
+                    };
+                }
+            }
+        }
+        Ok(Some(inode))
+    }
+
+    pub fn get_inode_in_dir(
+        &self,
+        inode: &Inode,
+        filename: &OsStr,
+        sb: &Superblock,
+    ) -> io::Result<Option<Inode>> {
+        if let Some(entries) = self.read_dir(inode, &sb)? {
+            for entry in entries {
+                if entry.name == filename {
+                    return self.get_inode(entry.inode, &sb);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn find_ptr(&self, nextptr: u32, offset: u32, level: u32, sb: &Superblock) -> io::Result<u32> {
         if level == 0 {
             Ok(nextptr)
         } else {
@@ -152,7 +164,7 @@ impl<T: disk::Disk> Ext2<T> {
         }
     }
 
-    pub fn get_block_ptr(&mut self, inode: &Inode, idx: u32, sb: &Superblock) -> io::Result<u32> {
+    pub fn get_block_ptr(&self, inode: &Inode, idx: u32, sb: &Superblock) -> io::Result<u32> {
         let blocksize = sb.block_size();
         let inodes_per_block = blocksize / sb.inode_size();
         let direct_limit = 12;
@@ -182,34 +194,29 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     /// TODO: Handle multiple block directories.
-    pub fn read_dir(
-        &mut self,
-        inode: &Inode,
-        sb: &Superblock,
-    ) -> Option<io::Result<Vec<DirEntry>>> {
+    pub fn read_dir(&self, inode: &Inode, sb: &Superblock) -> io::Result<Option<Vec<DirEntry>>> {
         match inode.file_type() {
             FileType::Directory => {
                 let mut buf = vec![0; sb.block_size() as usize];
                 let mut vec = Vec::new();
-                Some(self.read_block(inode.i_block.0[0], &mut buf, sb).map(|()| {
-                    let mut start: usize = 0;
-                    while start < sb.block_size() as usize {
-                        let entry = DirEntry::new(&buf[start..sb.block_size() as usize]);
-                        start += entry.rec_len as usize;
-                        if entry.inode == 0 {
-                            assert_eq!(start, sb.block_size() as usize)
-                        }
-                        vec.push(entry);
+                self.read_block(inode.i_block.0[0], &mut buf, sb)?;
+                let mut start: usize = 0;
+                while start < sb.block_size() as usize {
+                    let entry = DirEntry::new(&buf[start..sb.block_size() as usize]);
+                    start += entry.rec_len as usize;
+                    if entry.inode == 0 {
+                        assert_eq!(start, sb.block_size() as usize)
                     }
-                    vec
-                }))
+                    vec.push(entry);
+                }
+                Ok(Some(vec))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
     /// Todo: Fix calculation of blocks to be read.
-    pub fn read_file_block(
+    pub fn read_inode_data_block(
         &mut self,
         inode: &Inode,
         buf: &mut [u8],
@@ -503,7 +510,7 @@ pub struct DirEntry {
     pub rec_len: u16,
     pub name_len: u8,
     pub file_type: u8,
-    pub name: Vec<u8>, // Should this be OsString?
+    pub name: OsString, // Should this be OsString?
 }
 
 impl DirEntry {
@@ -513,7 +520,7 @@ impl DirEntry {
             rec_len: LE::read_u16(&data[4..6]),
             name_len: data[6],
             file_type: data[7],
-            name: data[8..8 + data[6] as usize].to_vec(),
+            name: OsStr::from_bytes(&data[8..8 + data[6] as usize]).to_os_string(),
         }
     }
 }
@@ -531,18 +538,57 @@ pub enum FileType {
     SymLink = 7,
 }
 
-#[cfg(test)]
-mod tests {
+pub struct Ext2Handle<'fs, 'path, T: disk::Disk + 'fs> {
+    fs: &'fs Ext2<T>,
+    path: &'path Path,
+    inode: Inode,
+    offset: usize,
+}
 
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+impl<'fs, 'path, T: disk::Disk + 'fs> Ext2Handle<'fs, 'path, T> {
+    pub fn new(fs: &'fs Ext2<T>, path: &'path Path) -> Ext2Handle<'fs, 'path, T> {
+        Ext2Handle {
+            fs,
+            path,
+            inode: Inode::default(),
+            offset: 0,
+        }
     }
 }
 
-pub struct Ext2Handle<'fs, 'inode, T> {
-    fs: &'fs Ext2<T>,
-    path: u32,
-    inode: &'inode Inode,
-    offset: usize,
+#[derive(Clone)]
+pub struct FsPath([u8; 64]);
+
+impl FsPath {
+    pub fn new(val: [u8; 64]) -> FsPath {
+        FsPath(val)
+    }
 }
+
+impl fmt::Debug for FsPath {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FsPath::new({:?})", &self.0[..])
+    }
+}
+
+impl Default for FsPath {
+    fn default() -> FsPath {
+        FsPath::new([0; 64])
+    }
+}
+
+impl PartialEq for FsPath {
+    /// FsTitle compares equal if the elements match through the first null byte
+    fn eq(&self, other: &FsPath) -> bool {
+        for i in 0..64 {
+            if self.0[i] != other.0[i] {
+                return false;
+            } else if self.0[i] == 0 {
+                return true;
+            }
+        }
+        true
+    }
+}
+
+impl Eq for FsPath {}

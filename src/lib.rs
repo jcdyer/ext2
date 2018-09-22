@@ -6,34 +6,9 @@ use std::fmt;
 use std::io;
 use byteorder::{ByteOrder, LE};
 
-mod disk;
+pub mod disk;
+mod array;
 
-fn array64(input: &[u8]) -> [u8; 64] {
-    let mut a = [0; 64];
-    copy_array(input, &mut a[..]);
-    a
-}
-
-fn array16(input: &[u8]) -> [u8; 16] {
-    let mut a = [0; 16];
-    copy_array(input, &mut a[..]);
-    a
-}
-
-fn array12(input: &[u8]) -> [u8; 12] {
-    let mut a = [0; 12];
-    copy_array(input, &mut a[..]);
-    a
-}
-
-fn copy_array(input: &[u8], output: &mut [u8]) {
-    if input.len() != output.len() {
-        panic!("Requires an input length of {}", output.len());
-    }
-    for i in 0..input.len() {
-        output[i] = input[i];
-    }
-}
 
 #[derive(Clone)]
 pub struct FsPath([u8; 64]);
@@ -76,8 +51,12 @@ pub struct Ext2<T: disk::Disk>(T);
 
 /// Ext2 Filesystem
 impl<T: disk::Disk> Ext2<T> {
-    pub fn open(disk: T) -> io::Result<Ext2<T>> {
+    pub fn new(disk: T) -> io::Result<Ext2<T>> {
         Ok(Ext2(disk))
+    }
+
+    pub fn open(&self, path: &[u8]) -> Ext2Handle {
+        Ext2Handle { fs: self, path, offset: 0 }
     }
 
     fn read_block(&mut self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
@@ -329,8 +308,8 @@ impl Superblock {
             s_feature_incompat: LE::read_u32(&data[96..100]),
             s_feature_ro_compat: LE::read_u32(&data[100..104]),
             s_uuid: uuid::Uuid::from_slice(&data[104..120]).unwrap(),
-            s_volume_name: array16(&data[120..136]),
-            s_last_mounted: FsPath::new(array64(&data[136..200])),
+            s_volume_name: array::array16(&data[120..136]),
+            s_last_mounted: FsPath::new(array::array64(&data[136..200])),
             s_algo_bitmap: LE::read_u32(&data[200..204]),
             // Performance hints
             s_prealloc_blocks: data[204],
@@ -410,7 +389,7 @@ impl BlockGroupDescriptor {
             bg_free_inodes_count: LE::read_u16(&data[14..16]),
             bg_used_dirs_count: LE::read_u16(&data[16..18]),
             bg_pad: LE::read_u16(&data[18..20]),
-            bg_reserved: array12(&data[20..32]),
+            bg_reserved: array::array12(&data[20..32]),
         })
     }
 }
@@ -476,7 +455,7 @@ impl Inode {
             i_file_acl: LE::read_u32(&data[104..108]),
             i_dir_acl: LE::read_u32(&data[108..112]),
             i_faddr: LE::read_u32(&data[112..116]),
-            i_osd2: array12(&data[116..128]),
+            i_osd2: array::array12(&data[116..128]),
         })
     }
 
@@ -545,4 +524,11 @@ mod tests {
     fn it_works() {
         assert_eq!(2 + 2, 4);
     }
+}
+
+pub struct Ext2Handle<T, 'fs, 'inode> {
+    fs: &'fs Ext2<T>,
+    path: u32,
+    inode: &'inode Inode,
+    offset: usize,
 }

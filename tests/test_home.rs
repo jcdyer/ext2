@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 #[test]
 fn basic_superblock() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let expected = Superblock {
         s_inodes_count: 32,
@@ -74,7 +74,7 @@ fn basic_superblock() {
 
 #[test]
 fn basic_descriptor() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let descriptor = fs.get_block_group_descriptor(0, &superblock).unwrap();
     let expected = BlockGroupDescriptor {
@@ -97,7 +97,7 @@ fn basic_descriptor() {
 
 #[test]
 fn basic_inode() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let inode = fs.get_root_directory(&superblock).unwrap();
     let expected = Inode {
@@ -126,7 +126,7 @@ fn basic_inode() {
 
 #[test]
 fn basic_directory_entry() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let inode = fs.get_root_directory(&superblock).unwrap();
     let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
@@ -151,7 +151,7 @@ fn basic_directory_entry() {
 
 #[test]
 fn basic_file_entry() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     let inode = fs.get_root_directory(&superblock).unwrap();
     let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
@@ -200,10 +200,18 @@ fn basic_file_entry() {
 
 #[test]
 fn get_inode_from_directory() {
-    let mut fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     assert_eq!(
-        fs.get_inode_from_abspath("/".as_ref(), &superblock).unwrap().unwrap(),
+        fs.get_inode_from_abspath("/", &superblock).unwrap().unwrap(),
         fs.get_root_directory(&superblock).unwrap(),
     );
+}
+
+#[test]
+fn read_file() {
+    let fs = File::open(".basic.ext2").and_then(Ext2::new).unwrap();
+    assert!(fs.open("/goodbye.txt").unwrap().is_some());
+    assert!(fs.open("/sub/michelle.jpg").unwrap().is_some());
+    assert!(fs.open("/goodbye.doc").unwrap().is_none());
 }

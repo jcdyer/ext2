@@ -6,7 +6,7 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use byteorder::{ByteOrder, LE};
 
@@ -21,13 +21,10 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(Ext2(Mutex::new(disk)))
     }
 
-    pub fn open<'fs, 'path>(&'fs self, path: &'path Path) -> Ext2Handle<'fs, 'path, T> {
-        Ext2Handle {
-            fs: self,
-            path,
-            inode: Inode::default(),
-            offset: 0,
-        }
+    pub fn open<'fs, P: AsRef<Path>>(&'fs self, path: P) -> io::Result<Option<Ext2Handle<'fs, T>>> {
+        let superblock = self.superblock()?;
+        let inode = self.get_inode_from_abspath(&path, &superblock)?;
+        Ok(inode.map(|inode| Ext2Handle::new(self, &path, superblock, inode)))
     }
 
     fn read_block(&self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
@@ -101,11 +98,12 @@ impl<T: disk::Disk> Ext2<T> {
         self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
     }
 
-    pub fn get_inode_from_abspath(
+    pub fn get_inode_from_abspath<P: AsRef<Path>>(
         &self,
-        path: &Path,
+        path: P,
         sb: &Superblock,
     ) -> io::Result<Option<Inode>> {
+        let path = path.as_ref();
         assert!(
             path.is_absolute(),
             "This library only supports absolute paths."
@@ -217,7 +215,7 @@ impl<T: disk::Disk> Ext2<T> {
 
     /// Todo: Fix calculation of blocks to be read.
     pub fn read_inode_data_block(
-        &mut self,
+        &self,
         inode: &Inode,
         buf: &mut [u8],
         idx: u32,
@@ -538,20 +536,49 @@ pub enum FileType {
     SymLink = 7,
 }
 
-pub struct Ext2Handle<'fs, 'path, T: disk::Disk + 'fs> {
+pub struct Ext2Handle<'fs, T: disk::Disk + 'fs> {
     fs: &'fs Ext2<T>,
-    path: &'path Path,
+    superblock: Superblock,
+    path: PathBuf,
     inode: Inode,
-    offset: usize,
+    offset: u64,
 }
 
-impl<'fs, 'path, T: disk::Disk + 'fs> Ext2Handle<'fs, 'path, T> {
-    pub fn new(fs: &'fs Ext2<T>, path: &'path Path) -> Ext2Handle<'fs, 'path, T> {
+impl<'fs, T: disk::Disk + 'fs> Ext2Handle<'fs, T> {
+    // HERE
+    pub fn new<P: AsRef<Path>>(fs: &'fs Ext2<T>, path: P, superblock: Superblock, inode: Inode) -> Ext2Handle<'fs, T> {
         Ext2Handle {
             fs,
-            path,
-            inode: Inode::default(),
+            superblock,
+            path: path.as_ref().to_owned(),
+            inode: inode,
             offset: 0,
+        }
+    }
+}
+
+impl<'fs, T: disk::Disk + 'fs> io::Seek for Ext2Handle<'fs, T> {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        use io::SeekFrom::*;
+        let (base, offset) = match pos {
+            Start(n) => {
+                self.offset = n;
+                return Ok(n);
+            }
+            End(n) => (self.inode.size(), n),
+            Current(n) => (self.offset, n),
+        };
+        let newpos = if offset >= 0 {
+            base.checked_add(offset as u64)
+        } else {
+            base.checked_sub(offset.wrapping_neg() as u64)
+        };
+        match newpos {
+            Some(n) => {
+                self.offset = n;
+                Ok(n)
+            }
+            None => Err(io::Error::new(io::ErrorKind::InvalidInput, "attempted to seek to negative or overflowing position")),
         }
     }
 }

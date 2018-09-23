@@ -16,9 +16,10 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use byteorder::{ByteOrder, LE};
 
-pub mod disk;
+mod disk;
 mod array;
 
+pub use disk::Disk;
 pub struct Ext2<T: disk::Disk>(Mutex<T>);
 
 /// Ext2 Filesystem
@@ -32,7 +33,10 @@ impl<T: disk::Disk> Ext2<T> {
         if let Some(inode) = self.get_inode_from_abspath(&path, &superblock)? {
             Ok(Ext2Handle::new(self, &path, superblock, inode))
         } else {
-            Err(io::Error::new(io::ErrorKind::NotFound, format!("{:?} not found", path.as_ref())))
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("{:?} not found", path.as_ref()),
+            ))
         }
     }
 

@@ -19,17 +19,17 @@ fn basic_superblock() {
         s_inodes_count: 32,
         s_blocks_count: 64,
         s_r_blocks_count: 3,
-        s_free_blocks_count: 30,
-        s_free_inodes_count: 17,
+        s_free_blocks_count: 12,
+        s_free_inodes_count: 15,
         s_first_data_block: 0,
         s_log_block_size: 2,
         s_log_frag_size: 2,
         s_blocks_per_group: 32768,
         s_frags_per_group: 32768,
         s_inodes_per_group: 32,
-        s_mtime: 1537149494,
-        s_wtime: 1537149919,
-        s_mnt_count: 1,
+        s_mtime: 1537710967,
+        s_wtime: 1537711046,
+        s_mnt_count: 2,
         s_max_mnt_count: 65535,
         s_magic: 61267,
         s_state: 1,
@@ -82,9 +82,9 @@ fn basic_descriptor() {
         bg_block_bitmap: 2,
         bg_inode_bitmap: 3,
         bg_inode_table: 4,
-        bg_free_blocks_count: 30,
-        bg_free_inodes_count: 17,
-        bg_used_dirs_count: 3,
+        bg_free_blocks_count: 12,
+        bg_free_inodes_count: 15,
+        bg_used_dirs_count: 4,
         bg_pad: 4,
         bg_reserved: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     };
@@ -105,7 +105,7 @@ fn basic_inode() {
         i_mode: 16877,
         i_uid: 0,
         i_size: 4096,
-        i_atime: 1537149907,
+        i_atime: 1537710973,
         i_ctime: 1537149905,
         i_mtime: 1537149905,
         i_dtime: 0,
@@ -257,7 +257,10 @@ fn file_read_full_block() {
     let mut f = fs.open("/hello.txt").unwrap();
     let mut buf = [255; 24];
     f.read(&mut buf[..]).unwrap();
-    assert_eq!(&buf[..], b"Hello world!\n\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+    assert_eq!(
+        &buf[..],
+        b"Hello world!\n\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+    );
 }
 
 #[test]

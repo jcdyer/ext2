@@ -1,3 +1,9 @@
+//! TODO:
+//!
+//! * Change io::Result<Option<T>> to io::Result<T> using
+//!   io::ErrorKind::NotFound in place of Ok(None)
+//! * Implement write
+
 extern crate byteorder;
 extern crate uuid;
 
@@ -21,10 +27,13 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(Ext2(Mutex::new(disk)))
     }
 
-    pub fn open<'fs, P: AsRef<Path>>(&'fs self, path: P) -> io::Result<Option<Ext2Handle<'fs, T>>> {
+    pub fn open<'fs, P: AsRef<Path>>(&'fs self, path: P) -> io::Result<Ext2Handle<'fs, T>> {
         let superblock = self.superblock()?;
-        let inode = self.get_inode_from_abspath(&path, &superblock)?;
-        Ok(inode.map(|inode| Ext2Handle::new(self, &path, superblock, inode)))
+        if let Some(inode) = self.get_inode_from_abspath(&path, &superblock)? {
+            Ok(Ext2Handle::new(self, &path, superblock, inode))
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotFound, format!("{:?} not found", path.as_ref())))
+        }
     }
 
     fn read_block(&self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
@@ -493,7 +502,7 @@ impl Inode {
     }
 
     pub fn size(&self) -> u64 {
-        (self.i_dir_acl as u64) << 32 + self.i_size as u64
+        ((self.i_dir_acl as u64) << 32) + self.i_size as u64
     }
 
     pub fn block_count(&self, sb: &Superblock) -> u32 {
@@ -541,19 +550,32 @@ pub struct Ext2Handle<'fs, T: disk::Disk + 'fs> {
     superblock: Superblock,
     path: PathBuf,
     inode: Inode,
-    offset: u64,
+    pos: u64,
 }
 
 impl<'fs, T: disk::Disk + 'fs> Ext2Handle<'fs, T> {
     // HERE
-    pub fn new<P: AsRef<Path>>(fs: &'fs Ext2<T>, path: P, superblock: Superblock, inode: Inode) -> Ext2Handle<'fs, T> {
+    pub fn new<P: AsRef<Path>>(
+        fs: &'fs Ext2<T>,
+        path: P,
+        superblock: Superblock,
+        inode: Inode,
+    ) -> Ext2Handle<'fs, T> {
         Ext2Handle {
             fs,
             superblock,
             path: path.as_ref().to_owned(),
             inode: inode,
-            offset: 0,
+            pos: 0,
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn size(&self) -> u64 {
+        self.inode.size()
     }
 }
 
@@ -562,11 +584,11 @@ impl<'fs, T: disk::Disk + 'fs> io::Seek for Ext2Handle<'fs, T> {
         use io::SeekFrom::*;
         let (base, offset) = match pos {
             Start(n) => {
-                self.offset = n;
+                self.pos = n;
                 return Ok(n);
             }
             End(n) => (self.inode.size(), n),
-            Current(n) => (self.offset, n),
+            Current(n) => (self.pos, n),
         };
         let newpos = if offset >= 0 {
             base.checked_add(offset as u64)
@@ -575,11 +597,46 @@ impl<'fs, T: disk::Disk + 'fs> io::Seek for Ext2Handle<'fs, T> {
         };
         match newpos {
             Some(n) => {
-                self.offset = n;
+                self.pos = n;
                 Ok(n)
             }
-            None => Err(io::Error::new(io::ErrorKind::InvalidInput, "attempted to seek to negative or overflowing position")),
+            None => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "attempted to seek to negative or overflowing position",
+            )),
         }
+    }
+}
+
+impl<'fs, T: disk::Disk + 'fs> io::Read for Ext2Handle<'fs, T> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bs = self.superblock.block_size() as u64;
+        let blocknum = (self.pos / bs) as u32;
+        let remaining = self.inode.size() - self.pos;
+        let offset = (self.pos % bs) as usize;
+        let read = if self.pos % bs == 0 && buf.len() >= bs as usize && remaining >= bs {
+            // Read an entire block cleanly into the provided buffer.
+            self.fs
+                .read_inode_data_block(&self.inode, buf, blocknum, &self.superblock)?
+        } else {
+            // Read a partial block into the provided buffer, using an internal
+            // buffer to read a whole block off the disk, with a length no
+            // greater than the length of the provided buffer or the number of
+            // bytes remaining in the file.
+            let mut innerbuf = vec![0; bs as usize];
+            let len = self.fs.read_inode_data_block(
+                &self.inode,
+                &mut innerbuf,
+                blocknum,
+                &self.superblock,
+            )?;
+            let len = len.min(buf.len());
+            let len = len.min(remaining as usize);
+            &mut buf[..len].copy_from_slice(&innerbuf[offset..len + offset]);
+            len
+        };
+        self.pos += read as u64;
+        Ok(read)
     }
 }
 

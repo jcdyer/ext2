@@ -5,6 +5,7 @@ extern crate uuid;
 
 use std::fs::File;
 use std::ffi::OsStr;
+use std::io::{self, Read, Seek};
 use std::os::unix::ffi::OsStrExt;
 
 use ext2::{BlockGroupDescriptor, DirEntry, Ext2, FileType, FsPath, Inode, Superblock};
@@ -139,10 +140,7 @@ fn basic_directory_entry() {
     };
     assert_eq!(entries.len(), 6);
     assert_eq!(entries[0], expected);
-    let filenames: Vec<_> = entries
-        .into_iter()
-        .map(|entry| entry.name)
-        .collect();
+    let filenames: Vec<_> = entries.into_iter().map(|entry| entry.name).collect();
     assert_eq!(
         filenames,
         vec![".", "..", "lost+found", "hello.txt", "sub", "goodbye.txt"],
@@ -191,7 +189,8 @@ fn basic_file_entry() {
         .unwrap()
         .unwrap();
     assert_eq!(file_inode, expected_inode);
-    let mut data = vec![0; superblock.block_size() as usize];
+    assert_eq!(superblock.block_size(), 4096);
+    let mut data = vec![0; 4096];
     let read = fs.read_inode_data_block(&file_inode, &mut data, 0, &superblock)
         .unwrap();
     assert_eq!(read, 4096);
@@ -203,15 +202,91 @@ fn get_inode_from_directory() {
     let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
     let superblock = fs.superblock().unwrap();
     assert_eq!(
-        fs.get_inode_from_abspath("/", &superblock).unwrap().unwrap(),
+        fs.get_inode_from_abspath("/", &superblock)
+            .unwrap()
+            .unwrap(),
         fs.get_root_directory(&superblock).unwrap(),
     );
+    let inode = fs.get_inode_from_abspath("/sub/michelle.jpg", &superblock)
+        .unwrap()
+        .unwrap();
+    let obama_portrait = Inode {
+        i_mode: 33188,
+        i_uid: 0,
+        i_size: 75557,
+        i_atime: 1537149748,
+        i_ctime: 1537149748,
+        i_mtime: 1537149748,
+        i_dtime: 0,
+        i_gid: 0,
+        i_links_count: 1,
+        i_blocks: 160,
+        i_flags: 0,
+        i_osd1: 1,
+        i_block: ([13, 14, 16, 15, 17, 18, 19, 20, 21, 22, 23, 24], 25, 0, 0),
+        i_generation: 1337774247,
+        i_file_acl: 0,
+        i_dir_acl: 0,
+        i_faddr: 0,
+        i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    };
+    assert_eq!(inode, obama_portrait);
 }
 
 #[test]
-fn read_file() {
-    let fs = File::open(".basic.ext2").and_then(Ext2::new).unwrap();
-    assert!(fs.open("/goodbye.txt").unwrap().is_some());
-    assert!(fs.open("/sub/michelle.jpg").unwrap().is_some());
-    assert!(fs.open("/goodbye.doc").unwrap().is_none());
+fn file_open() {
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    assert!(fs.open("/goodbye.txt").is_ok());
+    assert!(fs.open("/sub/michelle.jpg").is_ok());
+    assert!(fs.open("/goodbye.doc").is_err());
+}
+
+#[test]
+fn file_seek() {
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    let mut file = fs.open("/sub/michelle.jpg").unwrap();
+    assert_eq!(file.seek(io::SeekFrom::Current(0)).unwrap(), 0);
+    assert!(file.seek(io::SeekFrom::Current(-1)).is_err());
+    assert_eq!(file.seek(io::SeekFrom::End(0)).unwrap(), 75557);
+    assert_eq!(file.seek(io::SeekFrom::End(-256)).unwrap(), 75301);
+}
+
+#[test]
+fn file_read_full_block() {
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    let mut f = fs.open("/hello.txt").unwrap();
+    let mut buf = [255; 24];
+    f.read(&mut buf[..]).unwrap();
+    assert_eq!(&buf[..], b"Hello world!\n\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff");
+}
+
+#[test]
+fn file_read_more_than_a_block() {
+    // Current implementation only reads one block at a time.
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    let mut f = fs.open("/sub/michelle.jpg").unwrap();
+    let mut buf = [255; 4099];
+    f.read(&mut buf[..]).unwrap();
+    assert_eq!(&buf[4094..], b"\x66\x47\xff\xff\xff");
+}
+
+#[test]
+fn file_read_past_end_of_file() {
+    // Reading truncates at the end of the file
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    let mut f = fs.open("/sub/michelle.jpg").unwrap();
+    f.seek(io::SeekFrom::End(-256)).unwrap();
+    let mut buf = [255; 4096];
+    assert_eq!(f.read(&mut buf[..]).unwrap(), 256);
+    assert_eq!(&buf[254..258], b"\x18\x62\xff\xff");
+}
+
+#[test]
+fn file_read_no_more_than_requested() {
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    let mut f = fs.open("/goodbye.txt").unwrap();
+    f.seek(io::SeekFrom::Start(6)).unwrap();
+    let mut buf = [255; 5];
+    assert_eq!(f.read(&mut buf[..]).unwrap(), 5);
+    assert_eq!(&buf[..], b"Pkunk");
 }

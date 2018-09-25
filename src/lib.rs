@@ -5,7 +5,7 @@
 //! * Implement write
 
 extern crate byteorder;
-extern crate uuid;
+#[macro_use] extern crate serde_derive;
 
 use std::cmp::PartialEq;
 use std::ffi::{OsStr, OsString};
@@ -67,7 +67,7 @@ impl<T: disk::Disk> Ext2<T> {
             disk.read_sector(2, &mut block[..512])?;
             disk.read_sector(3, &mut block[512..])?;
         }
-        Superblock::new(&block[..])
+        Superblock::new(&block)
     }
 
     pub fn first_descriptor_block(&self, sb: &Superblock) -> u32 {
@@ -249,7 +249,7 @@ impl<T: disk::Disk> Ext2<T> {
 ///
 /// See documentation at http://www.nongnu.org/ext2-doc/ext2.html#SUPERBLOCK
 #[repr(C)]
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Superblock {
     pub s_inodes_count: u32,
     pub s_blocks_count: u32,
@@ -283,7 +283,7 @@ pub struct Superblock {
     pub s_feature_compat: u32,
     pub s_feature_incompat: u32,
     pub s_feature_ro_compat: u32,
-    pub s_uuid: uuid::Uuid,
+    pub s_uuid: [u8; 16],
     pub s_volume_name: [u8; 16],
     pub s_last_mounted: FsPath,
     pub s_algo_bitmap: u32,
@@ -292,7 +292,7 @@ pub struct Superblock {
     pub s_prealloc_dir_blocks: u8,
     pub _align: (u8, u8),
     // Journaling support
-    pub s_journal_uuid: uuid::Uuid,
+    pub s_journal_uuid: [u8; 16],
     pub s_journal_inum: u32,
     pub s_journal_dev: u32,
     pub s_last_orphan: u32,
@@ -339,7 +339,7 @@ impl Superblock {
             s_feature_compat: LE::read_u32(&data[92..96]),
             s_feature_incompat: LE::read_u32(&data[96..100]),
             s_feature_ro_compat: LE::read_u32(&data[100..104]),
-            s_uuid: uuid::Uuid::from_slice(&data[104..120]).unwrap(),
+            s_uuid: array::array16(&data[104..120]),
             s_volume_name: array::array16(&data[120..136]),
             s_last_mounted: FsPath::new(array::array64(&data[136..200])),
             s_algo_bitmap: LE::read_u32(&data[200..204]),
@@ -348,7 +348,7 @@ impl Superblock {
             s_prealloc_dir_blocks: data[205],
             _align: (data[206], data[207]),
             // Journaling support
-            s_journal_uuid: uuid::Uuid::from_slice(&data[208..224]).unwrap(),
+            s_journal_uuid: array::array16(&data[208..224]),
             s_journal_inum: LE::read_u32(&data[224..228]),
             s_journal_dev: LE::read_u32(&data[228..232]),
             s_last_orphan: LE::read_u32(&data[232..236]),
@@ -644,18 +644,24 @@ impl<'fs, T: disk::Disk + 'fs> io::Read for Ext2Handle<'fs, T> {
     }
 }
 
-#[derive(Clone)]
-pub struct FsPath([u8; 64]);
+#[derive(Clone, Deserialize, Serialize)]
+pub struct FsPath([[u8; 32]; 2]);
 
 impl FsPath {
     pub fn new(val: [u8; 64]) -> FsPath {
-        FsPath(val)
+        FsPath(unsafe { std::mem::transmute(val) })
+    }
+
+    /// Iterator over the bytes before the first null byte.
+    pub fn bytes(&self) -> impl Iterator<Item = u8> {
+        let vec: Vec<u8> = self.0.concat().into_iter().take_while(|&x| x != 0).collect();
+        vec.into_iter()
     }
 }
 
 impl fmt::Debug for FsPath {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "FsPath::new({:?})", &self.0[..])
+        write!(f, "FsPath::new({:?}{:?})", &self.0[0], &self.0[1])
     }
 }
 
@@ -668,14 +674,7 @@ impl Default for FsPath {
 impl PartialEq for FsPath {
     /// FsTitle compares equal if the elements match through the first null byte
     fn eq(&self, other: &FsPath) -> bool {
-        for i in 0..64 {
-            if self.0[i] != other.0[i] {
-                return false;
-            } else if self.0[i] == 0 {
-                return true;
-            }
-        }
-        true
+        self.bytes().eq(other.bytes())
     }
 }
 

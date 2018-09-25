@@ -44,9 +44,9 @@ fn basic_superblock() {
         s_first_ino: 11,
         s_inode_size: 128,
         s_block_group_nr: 0,
-        s_feature_compat: 0x38,
-        s_feature_incompat: 0x2,
-        s_feature_ro_compat: 0x3,
+        s_feature_compat: 56,
+        s_feature_incompat: 2,
+        s_feature_ro_compat: 3,
         s_uuid: Uuid::from_bytes([
             175, 254, 89, 103, 185, 28, 68, 194, 156, 174, 245, 82, 44, 170, 139, 58
         ]),

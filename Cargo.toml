@@ -12,6 +12,9 @@ uuid = "0.7.1"
 image = { version = "*", optional = true }
 
 [[example]]
+name = "copytodisk"
+
+[[example]]
 name = "image"
 
 required-features = ["image_processing"]

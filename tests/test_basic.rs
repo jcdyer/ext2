@@ -1,7 +1,6 @@
 #![cfg(test)]
 
 extern crate ext2;
-extern crate uuid;
 
 use std::fs::File;
 use std::ffi::OsStr;
@@ -9,7 +8,6 @@ use std::io::{self, Read, Seek};
 use std::os::unix::ffi::OsStrExt;
 
 use ext2::{BlockGroupDescriptor, DirEntry, Ext2, FileType, FsPath, Inode, Superblock};
-use uuid::Uuid;
 
 #[test]
 fn basic_superblock() {
@@ -47,9 +45,9 @@ fn basic_superblock() {
         s_feature_compat: 0x38,
         s_feature_incompat: 0x2,
         s_feature_ro_compat: 0x3,
-        s_uuid: Uuid::from_bytes([
+        s_uuid: [
             175, 254, 89, 103, 185, 28, 68, 194, 156, 174, 245, 82, 44, 170, 139, 58
-        ]),
+        ],
         s_volume_name: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         s_last_mounted: FsPath::new([
             47, 104, 111, 109, 101, 47, 99, 108, 105, 102, 102, 47, 115, 114, 99, 47, 101, 120,
@@ -60,7 +58,7 @@ fn basic_superblock() {
         s_prealloc_blocks: 0,
         s_prealloc_dir_blocks: 0,
         _align: (0, 0),
-        s_journal_uuid: Uuid::from_bytes([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        s_journal_uuid: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         s_journal_inum: 0,
         s_journal_dev: 0,
         s_last_orphan: 0,

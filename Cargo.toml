@@ -7,8 +7,11 @@ authors = ["J. Cliff Dyer <jcd@sdf.org>"]
 image_processing = ["image"]
 
 [dependencies]
+bincode = "1.0.1"
 byteorder = "1.2.6"
-uuid = "0.7.1"
+serde = "1.0"
+serde_derive = "1.0"
+uuid = { version = "0.7.1", features = ["serde"] }
 image = { version = "*", optional = true }
 
 [[example]]
@@ -16,5 +19,7 @@ name = "copytodisk"
 
 [[example]]
 name = "image"
-
 required-features = ["image_processing"]
+
+[[example]]
+name = "bincode"

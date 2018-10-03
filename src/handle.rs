@@ -97,4 +97,3 @@ impl<'fs, T: disk::Disk + 'fs> io::Read for Ext2Handle<'fs, T> {
         Ok(read)
     }
 }
-

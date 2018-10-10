@@ -59,7 +59,7 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(())
     }
 
-    pub fn superblock(&self) -> io::Result<Superblock> {
+    fn superblock(&self) -> io::Result<Superblock> {
         let mut block = [0; 1024];
         {
             let mut disk = self.0
@@ -71,7 +71,7 @@ impl<T: disk::Disk> Ext2<T> {
         Superblock::new(&block)
     }
 
-    pub fn first_descriptor_block(&self, sb: &Superblock) -> u32 {
+    fn first_descriptor_block(&self, sb: &Superblock) -> u32 {
         if sb.block_size() == 1024 {
             2
         } else {
@@ -79,7 +79,7 @@ impl<T: disk::Disk> Ext2<T> {
         }
     }
 
-    pub fn get_block_group_descriptor(
+    fn get_block_group_descriptor(
         &self,
         groupnum: u32,
         sb: &Superblock,
@@ -96,7 +96,7 @@ impl<T: disk::Disk> Ext2<T> {
         }
     }
 
-    pub fn get_inode(&self, iptr: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
+    fn get_inode(&self, iptr: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
         let (igroup, ioffset) = sb.locate_inode(iptr);
         let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap(); // Should check for valid Inode
         let iblock = descriptor.bg_inode_table + (ioffset * sb.inode_size()) / sb.block_size();
@@ -108,11 +108,11 @@ impl<T: disk::Disk> Ext2<T> {
         )?))
     }
 
-    pub fn get_root_directory(&self, sb: &Superblock) -> io::Result<Inode> {
+    fn get_root_directory(&self, sb: &Superblock) -> io::Result<Inode> {
         self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
     }
 
-    pub fn get_inode_from_abspath<P: AsRef<Path>>(
+    fn get_inode_from_abspath<P: AsRef<Path>>(
         &self,
         path: P,
         sb: &Superblock,
@@ -140,7 +140,7 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(Some(inode))
     }
 
-    pub fn get_inode_in_dir(
+    fn get_inode_in_dir(
         &self,
         inode: &Inode,
         filename: &OsStr,
@@ -176,7 +176,7 @@ impl<T: disk::Disk> Ext2<T> {
         }
     }
 
-    pub fn get_block_ptr(&self, inode: &Inode, idx: u32, sb: &Superblock) -> io::Result<u32> {
+    fn get_block_ptr(&self, inode: &Inode, idx: u32, sb: &Superblock) -> io::Result<u32> {
         let blocksize = sb.block_size();
         let inodes_per_block = blocksize / sb.inode_size();
         let direct_limit = 12;
@@ -206,7 +206,7 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     /// TODO: Handle multiple block directories.
-    pub fn read_dir(&self, inode: &Inode, sb: &Superblock) -> io::Result<Option<Vec<DirEntry>>> {
+    fn read_dir(&self, inode: &Inode, sb: &Superblock) -> io::Result<Option<Vec<DirEntry>>> {
         match inode.file_type() {
             FileType::Directory => {
                 let mut buf = vec![0; sb.block_size() as usize];
@@ -228,7 +228,7 @@ impl<T: disk::Disk> Ext2<T> {
     }
 
     /// Todo: Fix calculation of blocks to be read.
-    pub fn read_inode_data_block(
+    fn read_inode_data_block(
         &self,
         inode: &Inode,
         buf: &mut [u8],
@@ -377,7 +377,7 @@ impl Superblock {
             }
     }
 
-    fn locate_inode(&self, inode: u32) -> (u32, u32) {
+    pub fn locate_inode(&self, inode: u32) -> (u32, u32) {
         let index = (inode - 1) / self.s_inodes_per_group;
         let offset = (inode - 1) % self.s_inodes_per_group;
         (index, offset)
@@ -387,7 +387,7 @@ impl Superblock {
         1024 << self.s_log_block_size
     }
 
-    fn inode_size(&self) -> u32 {
+    pub fn inode_size(&self) -> u32 {
         if self.s_rev_level > 0 {
             self.s_inode_size as u32
         } else {

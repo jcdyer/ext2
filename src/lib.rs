@@ -5,7 +5,8 @@
 //! * Implement write
 
 extern crate byteorder;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 
 use std::cmp::PartialEq;
 use std::ffi::{OsStr, OsString};
@@ -39,6 +40,10 @@ impl<T: disk::Disk> Ext2<T> {
                 format!("{:?} not found", path.as_ref()),
             ))
         }
+    }
+
+    pub fn block_size(&self) -> io::Result<u32> {
+        self.superblock().map(|sb| sb.block_size())
     }
 
     fn read_block(&self, blocknum: u32, buf: &mut [u8], sb: &Superblock) -> io::Result<()> {
@@ -98,7 +103,7 @@ impl<T: disk::Disk> Ext2<T> {
 
     fn get_inode(&self, iptr: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
         let (igroup, ioffset) = sb.locate_inode(iptr);
-        let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap(); // Should check for valid Inode
+        let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap();
         let iblock = descriptor.bg_inode_table + (ioffset * sb.inode_size()) / sb.block_size();
         let iblock_offset = ((ioffset * sb.inode_size()) % sb.block_size()) as usize;
         let mut buf = vec![0; sb.block_size() as usize];
@@ -161,18 +166,20 @@ impl<T: disk::Disk> Ext2<T> {
             Ok(nextptr)
         } else {
             let mut buf = vec![0; sb.block_size() as usize];
+            if nextptr == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "unexpectedly missing block",
+                ));
+            }
             self.read_block(nextptr, &mut buf, sb)?;
             let ptrs_per_block = sb.block_size() / 4;
-            let ptrs_per_bucket = ptrs_per_block.pow(level); // TODO: Find syntax for this.
-            let this_offset = (offset / ptrs_per_bucket) as usize;
-            let next_offset = offset % ptrs_per_bucket;
-
-            self.find_ptr(
-                LE::read_u32(&buf[this_offset * 4..(this_offset + 1) * 4]),
-                next_offset,
-                level - 1,
-                sb,
-            )
+            let ptrs_per_bucket = ptrs_per_block.pow(level);
+            let skipped_buckets = (offset / ptrs_per_bucket);
+            let next_offset = (offset - ptrs_per_bucket * skipped_buckets);
+            let nextptr =
+                LE::read_u32(&buf[next_offset as usize * 4..(next_offset as usize + 1) * 4]);
+            self.find_ptr(nextptr, next_offset, level - 1, sb)
         }
     }
 
@@ -186,7 +193,7 @@ impl<T: disk::Disk> Ext2<T> {
 
         let node = if idx < direct_limit {
             let level = 0;
-            self.find_ptr(inode.i_block.0[idx as usize], idx, level, sb)?
+            self.find_ptr(inode.i_block.0[idx as usize], 0, level, sb)?
         } else if idx < single_limit {
             let level = 1;
             self.find_ptr(inode.i_block.1, idx - direct_limit, level, sb)?
@@ -200,7 +207,7 @@ impl<T: disk::Disk> Ext2<T> {
             0
         };
         match node {
-            0 => Err(io::Error::new(io::ErrorKind::Other, "Not found")),
+            //0 => Err(io::Error::new(io::ErrorKind::NotFound, "End of the line")),
             x => Ok(x),
         }
     }
@@ -238,8 +245,12 @@ impl<T: disk::Disk> Ext2<T> {
         match inode.file_type() {
             FileType::File => {
                 let ptr = self.get_block_ptr(inode, idx, sb)?;
-                self.read_block(ptr, buf, sb)
-                    .map(|()| sb.block_size() as usize)
+                if ptr == 0 {
+                    Ok(0)
+                } else {
+                    self.read_block(ptr, buf, sb)
+                        .map(|()| sb.block_size() as usize)
+                }
             }
             _ => Err(io::Error::new(io::ErrorKind::Other, "Not found")),
         }
@@ -469,8 +480,8 @@ impl Inode {
                 [
                     LE::read_u32(&data[40..44]),
                     LE::read_u32(&data[44..48]),
-                    LE::read_u32(&data[52..56]),
                     LE::read_u32(&data[48..52]),
+                    LE::read_u32(&data[52..56]),
                     LE::read_u32(&data[56..60]),
                     LE::read_u32(&data[60..64]),
                     LE::read_u32(&data[64..68]),
@@ -560,7 +571,11 @@ impl FsPath {
 
     /// Iterator over the bytes before the first null byte.
     pub fn bytes(&self) -> impl Iterator<Item = u8> {
-        let vec: Vec<u8> = self.0.concat().into_iter().take_while(|&x| x != 0).collect();
+        let vec: Vec<u8> = self.0
+            .concat()
+            .into_iter()
+            .take_while(|&x| x != 0)
+            .collect();
         vec.into_iter()
     }
 }
@@ -588,227 +603,267 @@ impl Eq for FsPath {}
 
 #[cfg(test)]
 mod tests {
-use std::fs::File;
-use super::*;
-#[test]
-fn basic_superblock() {
-    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
-    let superblock = fs.superblock().unwrap();
-    let expected = Superblock {
-        s_inodes_count: 32,
-        s_blocks_count: 64,
-        s_r_blocks_count: 3,
-        s_free_blocks_count: 12,
-        s_free_inodes_count: 15,
-        s_first_data_block: 0,
-        s_log_block_size: 2,
-        s_log_frag_size: 2,
-        s_blocks_per_group: 32768,
-        s_frags_per_group: 32768,
-        s_inodes_per_group: 32,
-        s_mtime: 1537710967,
-        s_wtime: 1537711046,
-        s_mnt_count: 2,
-        s_max_mnt_count: 65535,
-        s_magic: 61267,
-        s_state: 1,
-        s_errors: 1,
-        s_minor_rev_level: 0,
-        s_lastcheck: 1537147869,
-        s_checkinterval: 0,
-        s_creator_os: 0,
-        s_rev_level: 1,
-        s_def_resuid: 0,
-        s_def_resgid: 0,
-        s_first_ino: 11,
-        s_inode_size: 128,
-        s_block_group_nr: 0,
-        s_feature_compat: 0x38,
-        s_feature_incompat: 0x2,
-        s_feature_ro_compat: 0x3,
-        s_uuid: [
-            175, 254, 89, 103, 185, 28, 68, 194, 156, 174, 245, 82, 44, 170, 139, 58
-        ],
-        s_volume_name: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        s_last_mounted: FsPath::new([
-            47, 104, 111, 109, 101, 47, 99, 108, 105, 102, 102, 47, 115, 114, 99, 47, 101, 120,
-            116, 50, 47, 109, 110, 116, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ]),
-        s_algo_bitmap: 0,
-        s_prealloc_blocks: 0,
-        s_prealloc_dir_blocks: 0,
-        _align: (0, 0),
-        s_journal_uuid: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        s_journal_inum: 0,
-        s_journal_dev: 0,
-        s_last_orphan: 0,
-        s_hash_seed: [3806470851, 3057855919, 2015335302, 3627203126],
-        s_def_hash_version: 1,
-        _hash_version_align: (0, 0, 0),
-        s_default_mount_options: 12,
-        s_first_meta_bg: 0,
-    };
-    assert_eq!(superblock, expected)
-}
+    use std::fs::File;
+    use super::*;
 
-#[test]
-fn basic_descriptor() {
-    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
-    let superblock = fs.superblock().unwrap();
-    let descriptor = fs.get_block_group_descriptor(0, &superblock).unwrap();
-    let expected = BlockGroupDescriptor {
-        bg_block_bitmap: 2,
-        bg_inode_bitmap: 3,
-        bg_inode_table: 4,
-        bg_free_blocks_count: 12,
-        bg_free_inodes_count: 15,
-        bg_used_dirs_count: 4,
-        bg_pad: 4,
-        bg_reserved: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    };
-    assert_eq!(descriptor, Some(expected));
-    assert!(
-        fs.get_block_group_descriptor(9999, &superblock)
+    #[test]
+    fn basic_superblock() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        let expected = Superblock {
+            s_inodes_count: 32,
+            s_blocks_count: 64,
+            s_r_blocks_count: 3,
+            s_free_blocks_count: 12,
+            s_free_inodes_count: 15,
+            s_first_data_block: 0,
+            s_log_block_size: 2,
+            s_log_frag_size: 2,
+            s_blocks_per_group: 32768,
+            s_frags_per_group: 32768,
+            s_inodes_per_group: 32,
+            s_mtime: 1537710967,
+            s_wtime: 1537711046,
+            s_mnt_count: 2,
+            s_max_mnt_count: 65535,
+            s_magic: 61267,
+            s_state: 1,
+            s_errors: 1,
+            s_minor_rev_level: 0,
+            s_lastcheck: 1537147869,
+            s_checkinterval: 0,
+            s_creator_os: 0,
+            s_rev_level: 1,
+            s_def_resuid: 0,
+            s_def_resgid: 0,
+            s_first_ino: 11,
+            s_inode_size: 128,
+            s_block_group_nr: 0,
+            s_feature_compat: 0x38,
+            s_feature_incompat: 0x2,
+            s_feature_ro_compat: 0x3,
+            s_uuid: [
+                175, 254, 89, 103, 185, 28, 68, 194, 156, 174, 245, 82, 44, 170, 139, 58
+            ],
+            s_volume_name: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            s_last_mounted: FsPath::new([
+                47, 104, 111, 109, 101, 47, 99, 108, 105, 102, 102, 47, 115, 114, 99, 47, 101, 120,
+                116, 50, 47, 109, 110, 116, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]),
+            s_algo_bitmap: 0,
+            s_prealloc_blocks: 0,
+            s_prealloc_dir_blocks: 0,
+            _align: (0, 0),
+            s_journal_uuid: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            s_journal_inum: 0,
+            s_journal_dev: 0,
+            s_last_orphan: 0,
+            s_hash_seed: [3806470851, 3057855919, 2015335302, 3627203126],
+            s_def_hash_version: 1,
+            _hash_version_align: (0, 0, 0),
+            s_default_mount_options: 12,
+            s_first_meta_bg: 0,
+        };
+        assert_eq!(superblock, expected)
+    }
+
+    #[test]
+    fn basic_descriptor() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        let descriptor = fs.get_block_group_descriptor(0, &superblock).unwrap();
+        let expected = BlockGroupDescriptor {
+            bg_block_bitmap: 2,
+            bg_inode_bitmap: 3,
+            bg_inode_table: 4,
+            bg_free_blocks_count: 12,
+            bg_free_inodes_count: 15,
+            bg_used_dirs_count: 4,
+            bg_pad: 4,
+            bg_reserved: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        };
+        assert_eq!(descriptor, Some(expected));
+        assert!(
+            fs.get_block_group_descriptor(9999, &superblock)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn basic_inode() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        let inode = fs.get_root_directory(&superblock).unwrap();
+        let expected = Inode {
+            i_mode: 16877,
+            i_uid: 0,
+            i_size: 4096,
+            i_atime: 1537710973,
+            i_ctime: 1537149905,
+            i_mtime: 1537149905,
+            i_dtime: 0,
+            i_gid: 0,
+            i_links_count: 4,
+            i_blocks: 8,
+            i_flags: 0,
+            i_osd1: 3,
+            i_block: ([5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0),
+            i_generation: 0,
+            i_file_acl: 0,
+            i_dir_acl: 0,
+            i_faddr: 0,
+            i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        };
+        assert_eq!(inode, expected);
+        assert_eq!(inode.file_type(), FileType::Directory);
+    }
+
+    #[test]
+    fn basic_directory_entry() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        let inode = fs.get_root_directory(&superblock).unwrap();
+        let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
+        let expected = DirEntry {
+            inode: 2,
+            rec_len: 12,
+            name_len: 1,
+            file_type: 2,
+            name: OsStr::from_bytes(b".").to_os_string(),
+        };
+        assert_eq!(entries.len(), 6);
+        assert_eq!(entries[0], expected);
+        let filenames: Vec<_> = entries.into_iter().map(|entry| entry.name).collect();
+        assert_eq!(
+            filenames,
+            vec![".", "..", "lost+found", "hello.txt", "sub", "goodbye.txt"],
+        );
+    }
+
+    #[test]
+    fn basic_file_entry() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        let inode = fs.get_root_directory(&superblock).unwrap();
+        let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
+        let file_entry = entries
+            .into_iter()
+            .find(|entry| entry.file_type == FileType::File as u8)
+            .unwrap();
+        let expected_entry = DirEntry {
+            inode: 12,
+            rec_len: 20,
+            name_len: 9,
+            file_type: 1,
+            name: OsStr::from_bytes(b"hello.txt").to_os_string(),
+        };
+        assert_eq!(file_entry, expected_entry);
+        let expected_inode = Inode {
+            i_mode: 33188,
+            i_uid: 0,
+            i_size: 13,
+            i_atime: 1537149548,
+            i_ctime: 1537149548,
+            i_mtime: 1537149548,
+            i_dtime: 0,
+            i_gid: 0,
+            i_links_count: 1,
+            i_blocks: 8,
+            i_flags: 0,
+            i_osd1: 1,
+            i_block: ([11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0),
+            i_generation: 270238708,
+            i_file_acl: 0,
+            i_dir_acl: 0,
+            i_faddr: 0,
+            i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        };
+        let file_inode = fs.get_inode(file_entry.inode, &superblock)
             .unwrap()
-            .is_none()
-    );
-}
+            .unwrap();
+        assert_eq!(file_inode, expected_inode);
+        assert_eq!(superblock.block_size(), 4096);
+        let mut data = vec![0; 4096];
+        let read = fs.read_inode_data_block(&file_inode, &mut data, 0, &superblock)
+            .unwrap();
+        assert_eq!(read, 4096);
+        assert_eq!(&String::from_utf8(data).unwrap()[..13], "Hello world!\n");
+    }
 
-#[test]
-fn basic_inode() {
-    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
-    let superblock = fs.superblock().unwrap();
-    let inode = fs.get_root_directory(&superblock).unwrap();
-    let expected = Inode {
-        i_mode: 16877,
-        i_uid: 0,
-        i_size: 4096,
-        i_atime: 1537710973,
-        i_ctime: 1537149905,
-        i_mtime: 1537149905,
-        i_dtime: 0,
-        i_gid: 0,
-        i_links_count: 4,
-        i_blocks: 8,
-        i_flags: 0,
-        i_osd1: 3,
-        i_block: ([5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0),
-        i_generation: 0,
-        i_file_acl: 0,
-        i_dir_acl: 0,
-        i_faddr: 0,
-        i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    };
-    assert_eq!(inode, expected);
-    assert_eq!(inode.file_type(), FileType::Directory);
-}
-
-#[test]
-fn basic_directory_entry() {
-    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
-    let superblock = fs.superblock().unwrap();
-    let inode = fs.get_root_directory(&superblock).unwrap();
-    let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
-    let expected = DirEntry {
-        inode: 2,
-        rec_len: 12,
-        name_len: 1,
-        file_type: 2,
-        name: OsStr::from_bytes(b".").to_os_string(),
-    };
-    assert_eq!(entries.len(), 6);
-    assert_eq!(entries[0], expected);
-    let filenames: Vec<_> = entries.into_iter().map(|entry| entry.name).collect();
-    assert_eq!(
-        filenames,
-        vec![".", "..", "lost+found", "hello.txt", "sub", "goodbye.txt"],
-    );
-}
-
-#[test]
-fn basic_file_entry() {
-    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
-    let superblock = fs.superblock().unwrap();
-    let inode = fs.get_root_directory(&superblock).unwrap();
-    let entries = fs.read_dir(&inode, &superblock).unwrap().unwrap();
-    let file_entry = entries
-        .into_iter()
-        .find(|entry| entry.file_type == FileType::File as u8)
-        .unwrap();
-    let expected_entry = DirEntry {
-        inode: 12,
-        rec_len: 20,
-        name_len: 9,
-        file_type: 1,
-        name: OsStr::from_bytes(b"hello.txt").to_os_string(),
-    };
-    assert_eq!(file_entry, expected_entry);
-    let expected_inode = Inode {
-        i_mode: 33188,
-        i_uid: 0,
-        i_size: 13,
-        i_atime: 1537149548,
-        i_ctime: 1537149548,
-        i_mtime: 1537149548,
-        i_dtime: 0,
-        i_gid: 0,
-        i_links_count: 1,
-        i_blocks: 8,
-        i_flags: 0,
-        i_osd1: 1,
-        i_block: ([11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0),
-        i_generation: 270238708,
-        i_file_acl: 0,
-        i_dir_acl: 0,
-        i_faddr: 0,
-        i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    };
-    let file_inode = fs.get_inode(file_entry.inode, &superblock)
-        .unwrap()
-        .unwrap();
-    assert_eq!(file_inode, expected_inode);
-    assert_eq!(superblock.block_size(), 4096);
-    let mut data = vec![0; 4096];
-    let read = fs.read_inode_data_block(&file_inode, &mut data, 0, &superblock)
-        .unwrap();
-    assert_eq!(read, 4096);
-    assert_eq!(&String::from_utf8(data).unwrap()[..13], "Hello world!\n");
-}
-
-#[test]
-fn get_inode_from_directory() {
-    let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
-    let superblock = fs.superblock().unwrap();
-    assert_eq!(
-        fs.get_inode_from_abspath("/", &superblock)
+    #[test]
+    fn get_inode_from_directory() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        assert_eq!(
+            fs.get_inode_from_abspath("/", &superblock)
+                .unwrap()
+                .unwrap(),
+            fs.get_root_directory(&superblock).unwrap(),
+        );
+        let inode = fs.get_inode_from_abspath("/sub/michelle.jpg", &superblock)
             .unwrap()
-            .unwrap(),
-        fs.get_root_directory(&superblock).unwrap(),
-    );
-    let inode = fs.get_inode_from_abspath("/sub/michelle.jpg", &superblock)
-        .unwrap()
-        .unwrap();
-    let obama_portrait = Inode {
-        i_mode: 33188,
-        i_uid: 0,
-        i_size: 75557,
-        i_atime: 1537149748,
-        i_ctime: 1537149748,
-        i_mtime: 1537149748,
-        i_dtime: 0,
-        i_gid: 0,
-        i_links_count: 1,
-        i_blocks: 160,
-        i_flags: 0,
-        i_osd1: 1,
-        i_block: ([13, 14, 16, 15, 17, 18, 19, 20, 21, 22, 23, 24], 25, 0, 0),
-        i_generation: 1337774247,
-        i_file_acl: 0,
-        i_dir_acl: 0,
-        i_faddr: 0,
-        i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    };
-    assert_eq!(inode, obama_portrait);
-}
+            .unwrap();
+        let obama_portrait = Inode {
+            i_mode: 33188,
+            i_uid: 0,
+            i_size: 75557,
+            i_atime: 1537149748,
+            i_ctime: 1537149748,
+            i_mtime: 1537149748,
+            i_dtime: 0,
+            i_gid: 0,
+            i_links_count: 1,
+            i_blocks: 160,
+            i_flags: 0,
+            i_osd1: 1,
+            i_block: ([13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24], 25, 0, 0),
+            i_generation: 1337774247,
+            i_file_acl: 0,
+            i_dir_acl: 0,
+            i_faddr: 0,
+            i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        };
+        assert_eq!(inode, obama_portrait);
+    }
+
+    #[test]
+    fn get_pattern_inode() {
+        let fs = File::open("./basic.ext2").and_then(Ext2::new).unwrap();
+        let superblock = fs.superblock().unwrap();
+        let inode = fs.get_inode_from_abspath("/sub/pattern/test_pattern.txt", &superblock)
+            .unwrap()
+            .unwrap();
+        let test_pattern = Inode {
+            i_mode: 33188,
+            i_uid: 0,
+            i_size: 65536,
+            i_atime: 1537711032,
+            i_ctime: 1537711032,
+            i_mtime: 1537711032,
+            i_dtime: 0,
+            i_gid: 0,
+            i_links_count: 1,
+            i_blocks: 136,
+            i_flags: 0,
+            i_osd1: 1,
+            i_block: ([32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43], 51, 0, 0),
+            i_generation: 2497518845,
+            i_file_acl: 0,
+            i_dir_acl: 0,
+            i_faddr: 0,
+            i_osd2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        };
+        assert_eq!(inode, test_pattern);
+        let mut buf = vec![0xff; 4096];
+        fs.read_block(32, &mut buf, &superblock);
+        assert_eq!(&mut buf[..8], b"0 ......");
+        fs.read_block(33, &mut buf, &superblock);
+        assert_eq!(&mut buf[..8], b"1 ......");
+        fs.read_block(34, &mut buf, &superblock);
+        assert_eq!(&mut buf[..8], b"2 ......");
+        fs.read_block(35, &mut buf, &superblock);
+        assert_eq!(&mut buf[..8], b"3 ......");
+    }
 }

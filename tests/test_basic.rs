@@ -7,7 +7,6 @@ use std::io::{self, Read, Seek};
 
 use ext2::Ext2;
 
-
 #[test]
 fn file_open() {
     let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
@@ -56,7 +55,10 @@ fn file_read_past_end_of_file() {
     f.seek(io::SeekFrom::End(-256)).unwrap();
     let mut buf = [255; 4096];
     assert_eq!(f.read(&mut buf[..]).unwrap(), 256);
-    assert_eq!(&buf[254..258], b"\x18\x62\xff\xff");
+    assert_eq!(
+        &buf[250..262],
+        b"\xd4\x67\x2f\x4f\xff\xd9\xff\xff\xff\xff\xff\xff"
+    );
 }
 
 #[test]
@@ -67,4 +69,26 @@ fn file_read_no_more_than_requested() {
     let mut buf = [255; 5];
     assert_eq!(f.read(&mut buf[..]).unwrap(), 5);
     assert_eq!(&buf[..], b"Pkunk");
+}
+
+#[test]
+fn read_large_file() {
+    let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
+    let bs = fs.block_size().unwrap() as usize;
+    let mut f = fs.open("/sub/pattern/test_pattern.txt").unwrap();
+    let mut buf = String::new();
+    f.read_to_string(&mut buf).unwrap();
+    for i in 1..10 {
+        assert_eq!(
+            &buf[bs * i - 1..bs * i + 15],
+            &format!("\n{} .............", i)
+        );
+    }
+    for i in 10..16 {
+        // One fewer dot for two digit numbers
+        assert_eq!(
+            &buf[bs * i - 1..bs * i + 15],
+            &format!("\n{} ............", i)
+        );
+    }
 }

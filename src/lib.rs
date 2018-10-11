@@ -175,8 +175,8 @@ impl<T: disk::Disk> Ext2<T> {
             self.read_block(nextptr, &mut buf, sb)?;
             let ptrs_per_block = sb.block_size() / 4;
             let ptrs_per_bucket = ptrs_per_block.pow(level);
-            let skipped_buckets = (offset / ptrs_per_bucket);
-            let next_offset = (offset - ptrs_per_bucket * skipped_buckets);
+            let skipped_buckets = offset / ptrs_per_bucket;
+            let next_offset = offset - ptrs_per_bucket * skipped_buckets;
             let nextptr =
                 LE::read_u32(&buf[next_offset as usize * 4..(next_offset as usize + 1) * 4]);
             self.find_ptr(nextptr, next_offset, level - 1, sb)
@@ -857,13 +857,13 @@ mod tests {
         };
         assert_eq!(inode, test_pattern);
         let mut buf = vec![0xff; 4096];
-        fs.read_block(32, &mut buf, &superblock);
+        fs.read_block(32, &mut buf, &superblock).unwrap();
         assert_eq!(&mut buf[..8], b"0 ......");
-        fs.read_block(33, &mut buf, &superblock);
+        fs.read_block(33, &mut buf, &superblock).unwrap();
         assert_eq!(&mut buf[..8], b"1 ......");
-        fs.read_block(34, &mut buf, &superblock);
+        fs.read_block(34, &mut buf, &superblock).unwrap();
         assert_eq!(&mut buf[..8], b"2 ......");
-        fs.read_block(35, &mut buf, &superblock);
+        fs.read_block(35, &mut buf, &superblock).unwrap();
         assert_eq!(&mut buf[..8], b"3 ......");
     }
 }

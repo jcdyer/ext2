@@ -1,8 +1,8 @@
 extern crate ext2;
 
+use ext2::Ext2;
 use std::fs::File;
 use std::io::{Read, Write};
-use ext2::{Disk, Ext2};
 
 fn main() {
     let ext2 = File::open("basic.ext2").and_then(Ext2::new).unwrap();

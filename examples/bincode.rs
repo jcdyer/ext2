@@ -3,7 +3,6 @@
 extern crate bincode;
 extern crate ext2;
 
-use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::SeekFrom;
@@ -14,7 +13,7 @@ use std::slice;
 use ext2::Superblock;
 
 /// Load the first superblock from the ext2 image given by path.
-fn load_superblock<P: AsRef<Path>>(path: P) -> Result<[u8; 1024], Box<Error>> {
+fn load_superblock<P: AsRef<Path>>(path: P) -> Result<[u8; 1024], anyhow::Error> {
     let mut buf = [0; 1024];
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(1024))?;
@@ -39,7 +38,7 @@ fn new_superblock_copy(raw_block: &[u8]) -> Superblock {
     superblock
 }
 
-fn main() -> Result<(), Box<Error>> {
+fn main() -> anyhow::Result<()> {
     let raw_block = load_superblock("basic.ext2")?;
     let superblock_ext2 = Superblock::new(&raw_block)?;
 

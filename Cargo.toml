@@ -2,11 +2,13 @@
 name = "ext2"
 version = "0.1.0"
 authors = ["J. Cliff Dyer <jcd@sdf.org>"]
+edition = "2018"
 
 [features]
 image_processing = ["image"]
 
 [dependencies]
+anyhow = "1.0.42"
 bincode = "1.0.1"
 byteorder = "1.2.6"
 serde = "1.0"

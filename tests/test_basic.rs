@@ -30,7 +30,8 @@ fn file_read_full_block() {
     let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
     let mut f = fs.open("/hello.txt").unwrap();
     let mut buf = [255; 24];
-    f.read(&mut buf[..]).unwrap();
+    let read = f.read(&mut buf[..]).unwrap();
+    assert_eq!(read, 13);
     assert_eq!(
         &buf[..],
         b"Hello world!\n\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
@@ -43,7 +44,8 @@ fn file_read_more_than_a_block() {
     let fs = File::open("basic.ext2").and_then(Ext2::new).unwrap();
     let mut f = fs.open("/sub/michelle.jpg").unwrap();
     let mut buf = [255; 4099];
-    f.read(&mut buf[..]).unwrap();
+    let x = f.read(&mut buf[..]).unwrap();
+    assert_eq!(x, 4096);
     assert_eq!(&buf[4094..], b"\x66\x47\xff\xff\xff");
 }
 

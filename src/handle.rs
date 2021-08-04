@@ -23,7 +23,7 @@ impl<'fs, T: disk::Disk + 'fs> Ext2Handle<'fs, T> {
             fs,
             superblock,
             path: path.as_ref().to_owned(),
-            inode: inode,
+            inode,
             pos: 0,
         }
     }
@@ -90,7 +90,7 @@ impl<'fs, T: disk::Disk + 'fs> io::Read for Ext2Handle<'fs, T> {
             )?;
             let len = len.min(buf.len());
             let len = len.min(remaining as usize);
-            &mut buf[..len].copy_from_slice(&innerbuf[offset..len + offset]);
+            buf[..len].copy_from_slice(&innerbuf[offset..len + offset]);
             len
         };
         self.pos += read as u64;

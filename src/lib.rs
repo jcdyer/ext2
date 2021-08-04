@@ -30,7 +30,7 @@ impl<T: disk::Disk> Ext2<T> {
         Ok(Ext2(Mutex::new(disk)))
     }
 
-    pub fn open<'fs, P: AsRef<Path>>(&'fs self, path: P) -> io::Result<handle::Ext2Handle<'fs, T>> {
+    pub fn open<P: AsRef<Path>>(&self, path: P) -> io::Result<handle::Ext2Handle<'_, T>> {
         let superblock = self.superblock()?;
         if let Some(inode) = self.get_inode_from_abspath(&path, &superblock)? {
             Ok(handle::Ext2Handle::new(self, &path, superblock, inode))
@@ -93,28 +93,28 @@ impl<T: disk::Disk> Ext2<T> {
             Ok(None)
         } else {
             let bs = sb.block_size();
-            let descriptor_block = (groupnum * 32) / bs + self.first_descriptor_block(&sb);
+            let descriptor_block = (groupnum * 32) / bs + self.first_descriptor_block(sb);
             let offset = ((groupnum * 32) % bs) as usize;
             let mut buf = vec![0; bs as usize];
-            self.read_block(descriptor_block, &mut buf, &sb)?;
+            self.read_block(descriptor_block, &mut buf, sb)?;
             Ok(Some(BlockGroupDescriptor::new(&buf[offset..offset + 32])?))
         }
     }
 
     fn get_inode(&self, iptr: u32, sb: &Superblock) -> io::Result<Option<Inode>> {
         let (igroup, ioffset) = sb.locate_inode(iptr);
-        let descriptor = self.get_block_group_descriptor(igroup, &sb)?.unwrap();
+        let descriptor = self.get_block_group_descriptor(igroup, sb)?.unwrap();
         let iblock = descriptor.bg_inode_table + (ioffset * sb.inode_size()) / sb.block_size();
         let iblock_offset = ((ioffset * sb.inode_size()) % sb.block_size()) as usize;
         let mut buf = vec![0; sb.block_size() as usize];
-        self.read_block(iblock, &mut buf[..], &sb)?;
+        self.read_block(iblock, &mut buf[..], sb)?;
         Ok(Some(Inode::new(
             &buf[iblock_offset..iblock_offset + sb.inode_size() as usize],
         )?))
     }
 
     fn get_root_directory(&self, sb: &Superblock) -> io::Result<Inode> {
-        self.get_inode(2, &sb).map(|optinode| optinode.unwrap())
+        self.get_inode(2, sb).map(|optinode| optinode.unwrap())
     }
 
     fn get_inode_from_abspath<P: AsRef<Path>>(
@@ -151,10 +151,10 @@ impl<T: disk::Disk> Ext2<T> {
         filename: &OsStr,
         sb: &Superblock,
     ) -> io::Result<Option<Inode>> {
-        if let Some(entries) = self.read_dir(inode, &sb)? {
+        if let Some(entries) = self.read_dir(inode, sb)? {
             for entry in entries {
                 if entry.name == filename {
-                    return self.get_inode(entry.inode, &sb);
+                    return self.get_inode(entry.inode, sb);
                 }
             }
         }
@@ -522,7 +522,7 @@ impl Inode {
     }
 
     pub fn block_count(&self, sb: &Superblock) -> u32 {
-        self.i_blocks / 2 << sb.s_log_block_size
+        self.i_blocks / (2 << sb.s_log_block_size)
     }
 }
 
@@ -571,12 +571,10 @@ impl FsPath {
 
     /// Iterator over the bytes before the first null byte.
     pub fn bytes(&self) -> impl Iterator<Item = u8> {
-        let vec: Vec<u8> = self.0
+        self.0
             .concat()
             .into_iter()
             .take_while(|&x| x != 0)
-            .collect();
-        vec.into_iter()
     }
 }
 
